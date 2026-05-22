@@ -318,10 +318,22 @@ Build steps:
 | Regional sub-selection | User draws a custom bounding box on the map to define an arbitrary region for metric computation. Requires interactive map selection. |
 | Additional regions | North Atlantic, North America as selectable regions via config. |
 | Project 2 hook | Statistical downscaling layer — if pursued, this repo extends into a Phase 8. Decision made in Claude.ai before any code is written. |
+| Date range pipeline trigger | Trigger new ERA5/GFS fetch from dashboard for a different date range. Level 3 feature. |
+| Cloud data hosting | Host processed metric files on cloud storage rather than in git repo. |
 
 ---
 
-## 8. Data Sources & Access
+## 8. Refinement Items
+*Known UI/UX improvements identified post-v1.0. Address in a dedicated refinement session before adding new features.*
+
+- Interactive date range selector in sidebar — allow user to select a custom analysis period without editing config.
+- Intermediate gridlines on skill curves x-axis — add minor gridlines between the 5 labelled data points for easier reading.
+- Map trapezoidal border fix — region highlight rectangle renders as a trapezoid at high latitudes due to geographic projection; fix with proper great-circle segment rendering.
+- Skill curves chart width adjustment — chart feels narrower than the spatial map at default window width; review column proportions in `dashboard/app.py`.
+
+---
+
+## 9. Data Sources & Access
 
 | Source | What | Access | Cost |
 |--------|------|--------|------|
@@ -336,12 +348,12 @@ Build steps:
 
 ---
 
-## 9. Working with Claude Code
+## 10. Working with Claude Code
 
-### 9.1 Starting a New Session
+### 10.1 Starting a New Session
 > I am building wx-verify — an NWP forecast verification dashboard. The full specification is in SPEC.md in this repo. Please read SPEC.md fully before doing anything. Current task is: [state current phase and step number].
 
-### 9.2 Key Principles
+### 10.2 Key Principles
 - Read SPEC.md at the start of every session before writing any code
 - Work one phase at a time — complete and commit before moving to the next
 - Never build anything not described in SPEC.md
@@ -350,7 +362,7 @@ Build steps:
 - Config controls all parameters — nothing hardcoded
 - All new ideas go to Claude.ai first, then spec update, then Claude Code
 
-### 9.3 Daily Routines
+### 10.3 Daily Routines
 
 **Start of session:**
 ```
@@ -379,7 +391,7 @@ git log --oneline            # recent commits
 streamlit run dashboard/app.py  # test dashboard locally
 ```
 
-### 9.4 Two Tool Workflow
+### 10.4 Two Tool Workflow
 
 | Tool | Use for |
 |------|---------|
