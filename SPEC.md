@@ -293,7 +293,7 @@ Build steps:
 
 | # | Phase found | Description | Status |
 |---|-------------|-------------|--------|
-| 001 | Phase 1 | `requirements.txt` has pinned dependency versions incompatible with Python 3.14. Newer compatible versions installed in practice. | Parked — Phase 7 cleanup |
+| 001 | Phase 1 | `requirements.txt` has pinned dependency versions incompatible with Python 3.14. Newer compatible versions installed in practice. | Resolved — requirements.txt updated to Python 3.14-compatible versions (May 2026) |
 | 002 | Phase 3 | cfgrib on Windows requires `ecmwflibs` package to supply the ecCodes native DLL. Handled automatically in `gfs_fetcher.py` but `ecmwflibs` is not yet in `requirements.txt`. | Parked — Phase 7 cleanup |
 | 003 | Phase 3 | GFS byte-range extraction used instead of full GRIB2 download (~350 KB per file vs ~400 MB). More efficient but dependent on `.idx` index files being present on AWS S3. | Noted for reference |
 
