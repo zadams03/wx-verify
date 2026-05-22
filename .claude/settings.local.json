@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(python -m pytest tests/test_era5_fetcher.py -v -m integration)",
+      "Bash(where python *)",
+      "Bash(python *)",
+      "Bash(venv\\\\Scripts\\\\python.exe -m pytest tests/test_metrics.py -v --ignore-glob=\"*integration*\" -m \"not integration\")",
+      "Bash(pip show *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8501/)",
+      "Bash(curl -s http://localhost:8501/)",
+      "Bash(curl -s http://localhost:8501/healthz)",
+      "Bash(curl -s http://localhost:8501/_stcore/health)",
+      "Bash(tasklist)",
+      "Bash(findstr streamlit *)",
+      "Bash(pip list *)",
+      "Bash(pip install *)",
+      "Bash(git ls-tree *)",
+      "Bash(curl -s http://localhost:8502/_stcore/health)",
+      "Bash(taskkill //F //IM python.exe //T)",
+      "Bash(rd /s /q \"C:\\\\Users\\\\zacha\\\\OneDrive\\\\Desktop\\\\wx-verify\\\\src\\\\viz\\\\__pycache__\")",
+      "Bash(rd /s /q \"C:\\\\Users\\\\zacha\\\\OneDrive\\\\Desktop\\\\wx-verify\\\\dashboard\\\\__pycache__\")",
+      "Bash(curl -s http://localhost:8503/_stcore/health)",
+      "Bash(xargs wc -l)"
+    ]
+  }
+}
