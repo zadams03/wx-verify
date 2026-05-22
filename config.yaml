@@ -1,0 +1,28 @@
+domain:
+  lat_min: 35
+  lat_max: 65
+  lon_min: -15
+  lon_max: 25
+
+date_range:
+  start: "2023-01-01"
+  end: "2024-12-31"
+
+models:
+  primary: "gfs"
+  comparison: null       # Set to "ecmwf" when ECMWF data added
+
+variables:
+  - name: "t2m"
+    long_name: "2m Temperature"
+    units: "°C"
+
+lead_times_hours: [24, 48, 72, 120, 240]
+
+gfs:
+  resolution: 0.25
+  runs_per_day: 4        # 00z, 06z, 12z, 18z
+
+era5:
+  resolution: 0.25
+  cds_variable: "2m_temperature"
