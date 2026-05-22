@@ -119,7 +119,6 @@ def load_era5(config: Config, year: int, month: int) -> xr.DataArray:
 
     domain = config.domain
     # ERA5 latitude is ordered N→S, so slice high→low
-    # ERA5 latitude is ordered N→S, so slice high→low
     da = da.sel(
         latitude=slice(domain.lat_max, domain.lat_min),
         longitude=slice(domain.lon_min, domain.lon_max),
