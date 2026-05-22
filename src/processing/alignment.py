@@ -16,7 +16,6 @@ _FORECASTS_DIR = _REPO_ROOT / "data" / "processed" / "forecasts"
 _KELVIN_TO_CELSIUS = 273.15
 
 
-# Step 22: spatial + temporal alignment
 def align(
     gfs: xr.DataArray,
     era5: xr.DataArray,
@@ -86,7 +85,6 @@ def align(
     return forecast, obs
 
 
-# Step 25: validator
 def validate_aligned(forecast: xr.DataArray, obs: xr.DataArray) -> None:
     """Raise ValueError if forecast and obs are not compatible for metric computation.
 

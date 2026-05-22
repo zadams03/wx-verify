@@ -112,7 +112,6 @@ class GFSFetcher(BaseFetcher):
     One file per (init_date, run_hour, lead_time).
     """
 
-    # Step 16 + 17: fetch with caching
     def fetch(self, init_date: date, run_hour: int, lead_h: int) -> Path:
         """Download one GFS T2m GRIB2 record. Returns cached path if already present."""
         out = _grib_path(init_date, run_hour, lead_h)
@@ -168,7 +167,6 @@ class GFSFetcher(BaseFetcher):
             current += timedelta(days=1)
         return paths
 
-    # Step 19: validation
     def validate(self, init_date: date, run_hour: int) -> None:
         """Check all configured lead times are cached, in Kelvin, and spatially sane."""
         cfg = self.config
@@ -200,7 +198,6 @@ class GFSFetcher(BaseFetcher):
                 f"Missing lead times for {init_date} {run_hour:02d}z: {missing}"
             )
 
-    # Step 18: GRIB2 parser → 4D DataArray
     def load(
         self,
         init_dates: list[date],

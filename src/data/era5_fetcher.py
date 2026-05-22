@@ -25,7 +25,6 @@ def _output_path(year: int, month: int) -> Path:
     return _ERA5_RAW_DIR / f"era5_t2m_{year:04d}-{month:02d}.nc"
 
 
-# Step 9 + 10: fetch with caching
 def fetch_era5(config: Config, year: int, month: int) -> Path:
     """Download one month of ERA5 T2m to data/raw/era5/. Returns local path.
 
@@ -63,7 +62,6 @@ def fetch_era5(config: Config, year: int, month: int) -> Path:
     return out
 
 
-# Step 11: validation
 def validate_era5_file(path: Path, year: int, month: int) -> None:
     """Raise ValueError if the file fails dimension, coverage, or NaN checks."""
     ds = xr.open_dataset(path)
@@ -102,7 +100,6 @@ def validate_era5_file(path: Path, year: int, month: int) -> None:
         ds.close()
 
 
-# Step 12: loader
 def load_era5(config: Config, year: int, month: int) -> xr.DataArray:
     """Open a cached ERA5 file, subset to config domain, return t2m DataArray.
 

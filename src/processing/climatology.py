@@ -16,7 +16,6 @@ _CLIM_FILE = _PROCESSED_DIR / "climatology_t2m.nc"
 _KELVIN_TO_CELSIUS = 273.15
 
 
-# Step 23: monthly climatological mean from ERA5
 def compute_climatology(era5_months: list[xr.DataArray]) -> xr.DataArray:
     """Compute monthly T2m climatological mean from a list of ERA5 DataArrays.
 
@@ -50,7 +49,6 @@ def load_climatology() -> xr.DataArray:
     return xr.open_dataset(_CLIM_FILE)["t2m"]
 
 
-# Step 24: anomaly computation
 def compute_anomaly(da: xr.DataArray, clim: xr.DataArray) -> xr.DataArray:
     """Subtract monthly climatology from da.
 

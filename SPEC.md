@@ -279,12 +279,17 @@ Build steps:
 *Goal: publicly accessible dashboard, clean GitHub repo, professional README.*
 
 Build steps:
-42. Write full `README.md` — project overview, scientific methodology, data sources, setup instructions, how to run locally, link to live dashboard. Written to be readable by a meteorology admissions reader.
-43. Clean `requirements.txt` — verify all dependencies pinned to specific versions
-44. Deploy to Streamlit Community Cloud — connect GitHub repo, set secrets for CDS API key, verify live deployment
-45. Full codebase cleanup — remove dead code, unused imports, debug print statements
-46. Spec vs build audit — verify SPEC.md accurately reflects what was actually built. Update any divergences.
-47. Final commit: "Phase 7 complete — wx-verify v1.0"
+42. Write full `README.md` — project overview, scientific methodology, data sources, setup instructions, how to run locally, link to live dashboard. Written to be readable by a meteorology admissions reader. ✓ Complete
+43. Clean `requirements.txt` — verify all dependencies pinned to specific versions ✓ Complete (updated for Python 3.14 in May 2026)
+44. Deploy to Streamlit Community Cloud — connect GitHub repo, set secrets for CDS API key, verify live deployment *(deferred — dashboard is locally verified and running)*
+45. Full codebase cleanup — remove dead code, unused imports, debug print statements ✓ Complete (build-phase step comments removed; no dead code or unused imports found)
+46. Spec vs build audit — verify SPEC.md accurately reflects what was actually built. Update any divergences. ✓ Complete — divergences noted below
+47. Final commit: "Phase 7 complete — wx-verify v1.0" ✓ Complete
+
+**Phase 7 build divergences (step 46 audit):**
+- Step 36 spec says "choropleth map" — implemented as `go.Scattergeo` (one marker per 0.25° grid cell) rather than a true choropleth. Scattergeo is the standard approach for continuous gridded data in Plotly and produces an equivalent visual result. A true choropleth would require a GeoJSON polygon per grid cell (~19,200 polygons), which is impractical at this resolution.
+- Step 37 spec says "date range slider" — implemented as a static date range display (config values). The pipeline produces a single set of metrics over the full configured period; a time-slicing slider requires sub-period metric files that the current pipeline does not generate. Parked for a future enhancement.
+- Phase 6 files were first committed in the style-pass commit (step 40) rather than at step 41, because the requirements-fix session intervened before the Phase 6 commit was made.
 
 ---
 
@@ -294,7 +299,7 @@ Build steps:
 | # | Phase found | Description | Status |
 |---|-------------|-------------|--------|
 | 001 | Phase 1 | `requirements.txt` has pinned dependency versions incompatible with Python 3.14. Newer compatible versions installed in practice. | Resolved — requirements.txt updated to Python 3.14-compatible versions (May 2026) |
-| 002 | Phase 3 | cfgrib on Windows requires `ecmwflibs` package to supply the ecCodes native DLL. Handled automatically in `gfs_fetcher.py` but `ecmwflibs` is not yet in `requirements.txt`. | Parked — Phase 7 cleanup |
+| 002 | Phase 3 | cfgrib on Windows requires `ecmwflibs` package to supply the ecCodes native DLL. Handled automatically in `gfs_fetcher.py` but `ecmwflibs` is not yet in `requirements.txt`. | Resolved — `ecmwflibs==0.7.0` added to requirements.txt (May 2026) |
 | 003 | Phase 3 | GFS byte-range extraction used instead of full GRIB2 download (~350 KB per file vs ~400 MB). More efficient but dependent on `.idx` index files being present on AWS S3. | Noted for reference |
 
 ---
