@@ -282,7 +282,7 @@ Build steps:
 Build steps:
 42. Write full `README.md` — project overview, scientific methodology, data sources, setup instructions, how to run locally, link to live dashboard. Written to be readable by a meteorology admissions reader. ✓ Complete
 43. Clean `requirements.txt` — verify all dependencies pinned to specific versions ✓ Complete (updated for Python 3.14 in May 2026)
-44. Deploy to Streamlit Community Cloud — connect GitHub repo, set secrets for CDS API key, verify live deployment *(deferred — dashboard is locally verified and running)*
+44. Deploy to Streamlit Community Cloud — connect GitHub repo, set secrets for CDS API key, verify live deployment. ✓ Complete — live at https://wx-verify-uvv947uunr9zlvzg6bp5mx.streamlit.app/
 45. Full codebase cleanup — remove dead code, unused imports, debug print statements ✓ Complete (build-phase step comments removed; no dead code or unused imports found)
 46. Spec vs build audit — verify SPEC.md accurately reflects what was actually built. Update any divergences. ✓ Complete — divergences noted below
 47. Final commit: "Phase 7 complete — wx-verify v1.0" ✓ Complete
