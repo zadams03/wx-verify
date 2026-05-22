@@ -1,7 +1,7 @@
 # wx-verify
 ## NWP Forecast Verification Dashboard
 **Technical Project Specification · Version 1.0 — Complete · May 2026**
-Personal Research Project · GitHub: github.com/[username]/wx-verify
+Personal Research Project · GitHub: github.com/zadams03/wx-verify
 
 ---
 
