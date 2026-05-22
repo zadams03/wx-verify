@@ -1,6 +1,6 @@
 # wx-verify
 ## NWP Forecast Verification Dashboard
-**Technical Project Specification · Version 1.0 · May 2026**
+**Technical Project Specification · Version 1.0 — Complete · May 2026**
 Personal Research Project · GitHub: github.com/[username]/wx-verify
 
 ---
@@ -272,6 +272,7 @@ Build steps:
 39. Test: run dashboard locally (`streamlit run dashboard/app.py`), verify all charts render correctly and controls update plots
 40. Style pass — consistent colour scheme, axis formatting, hover labels, chart titles
 41. Commit: "Phase 6 complete — dashboard"
+    - Note: Scattergeo used instead of choropleth for spatial map — correct technical choice at 0.25° gridded resolution.
 
 ---
 
