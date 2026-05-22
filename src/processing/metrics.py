@@ -13,10 +13,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _METRICS_DIR = _REPO_ROOT / "data" / "processed" / "metrics"
 
 
-# ---------------------------------------------------------------------------
-# Step 28: core metric functions
-# ---------------------------------------------------------------------------
-
 def compute_bias(forecast: xr.DataArray, obs: xr.DataArray) -> xr.DataArray:
     """Mean signed error averaged over init_time (forecast − obs).
 
@@ -63,10 +59,6 @@ def compute_acc(forecast_anom: xr.DataArray, obs_anom: xr.DataArray) -> xr.DataA
     return acc
 
 
-# ---------------------------------------------------------------------------
-# Step 29: metrics runner
-# ---------------------------------------------------------------------------
-
 def run_metrics(
     forecast: xr.DataArray,
     obs: xr.DataArray,
@@ -107,10 +99,6 @@ def _save_metric_maps(metrics: dict[str, xr.DataArray], output_dir: Path) -> Non
         da.to_dataset(name=name).to_netcdf(out)
         logger.info("Saved metric: %s", out.name)
 
-
-# ---------------------------------------------------------------------------
-# Step 30: summary statistics
-# ---------------------------------------------------------------------------
 
 def compute_summary(metrics: dict[str, xr.DataArray]) -> pd.DataFrame:
     """Compute domain-mean metric values per lead time.
