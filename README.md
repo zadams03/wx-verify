@@ -4,7 +4,7 @@
 
 wx-verify measures how accurately the NOAA Global Forecast System (GFS) predicts surface temperatures across Western Europe, and how that accuracy deteriorates as forecasts look further into the future. It ingests publicly archived GFS model output alongside ERA5 reanalysis data, computes standard meteorological skill scores, and presents the results through an interactive Streamlit dashboard.
 
-> **Live dashboard:** *(deployment link — coming in Phase 7)*
+> **Live dashboard:** https://wx-verify-uvv947uunr9zlvzg6bp5mx.streamlit.app/
 
 ---
 
