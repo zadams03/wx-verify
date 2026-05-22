@@ -265,9 +265,9 @@ Build steps:
 
 Build steps:
 34. Write `dashboard/app.py` — Streamlit entry point. Loads config and all processed metric files. Sidebar controls for date range, lead time selection, metric selection.
-35. Write `src/viz/skill_curves.py` — Plotly line chart of domain-mean RMSE/ACC/bias vs lead time. Clean axis labels, units, reference lines (e.g. ACC=0.6 skill threshold).
-36. Write `src/viz/spatial_maps.py` — Plotly choropleth map of RMSE and bias spatially across Western Europe for a selected lead time. Colour scale diverging around zero for bias.
-37. Write `src/viz/components.py` — reusable Streamlit components: metric card (shows domain-mean value), lead time selector, date range slider
+35. Write `src/viz/skill_curves.py` — Plotly line chart of domain-mean RMSE, ACC, and Bias vs lead time. X-axis logarithmic. Gridlines every 24h, labelled at data points only (24h, 48h, 72h, 120h, 240h). ACC=0.6 skill threshold reference line included. Chart updates based on selected region from sidebar.
+36. Write `src/viz/spatial_maps.py` — Plotly choropleth map of Western Europe with three toggle views: RMSE (YlOrRd colour scale), Bias (diverging blue-white-red, blue=too cold, red=too warm), and ACC skill (green=above 0.6 threshold, red=below). Selected region highlighted on map. Colour scale legend updates with each toggle.
+37. Write `src/viz/components.py` — reusable Streamlit components: metric summary cards (ACC, RMSE, Bias, skill threshold above/below with colour coding), lead time selector buttons, date range slider, and region selector dropdown with presets: Western Europe (full domain), UK & Ireland, Scandinavia, Mediterranean, Central Europe, Iberian Peninsula. All metric cards and skill curves update when region changes.
 38. Wire all components into `app.py` — full dashboard with: skill curves panel, spatial map panel, metric summary cards, sidebar controls
 39. Test: run dashboard locally (`streamlit run dashboard/app.py`), verify all charts render correctly and controls update plots
 40. Style pass — consistent colour scheme, axis formatting, hover labels, chart titles
@@ -309,6 +309,8 @@ Build steps:
 | Ensemble verification | GFS ensemble spread/skill relationship. Requires ensemble archive access. |
 | Seasonal breakdown | Skill scores stratified by season — winter vs summer performance differences. |
 | Extended domain | Add North Atlantic, North America as selectable regions via config. |
+| Regional sub-selection | User draws a custom bounding box on the map to define an arbitrary region for metric computation. Requires interactive map selection. |
+| Additional regions | North Atlantic, North America as selectable regions via config. |
 | Project 2 hook | Statistical downscaling layer — if pursued, this repo extends into a Phase 8. Decision made in Claude.ai before any code is written. |
 
 ---
