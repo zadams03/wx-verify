@@ -160,7 +160,7 @@ era5:
 |-----------|-----------|--------|
 | Language | Python 3.11+ | Standard for scientific computing |
 | Data handling | xarray, pandas | Gridded and tabular data |
-| GFS data | cfgrib, requests | GRIB2 parsing and NOAA archive access |
+| GFS data | cfgrib, ecmwflibs, requests | GRIB2 parsing and AWS S3 archive access (noaa-gfs-bdp-pds) |
 | ERA5 data | cdsapi | Official Copernicus CDS client |
 | Metrics | numpy, scipy | Skill score computation |
 | Visualisation | plotly | Interactive charts |
@@ -293,7 +293,9 @@ Build steps:
 
 | # | Phase found | Description | Status |
 |---|-------------|-------------|--------|
-| — | — | None yet | — |
+| 001 | Phase 1 | `requirements.txt` has pinned dependency versions incompatible with Python 3.14. Newer compatible versions installed in practice. | Parked — Phase 7 cleanup |
+| 002 | Phase 3 | cfgrib on Windows requires `ecmwflibs` package to supply the ecCodes native DLL. Handled automatically in `gfs_fetcher.py` but `ecmwflibs` is not yet in `requirements.txt`. | Parked — Phase 7 cleanup |
+| 003 | Phase 3 | GFS byte-range extraction used instead of full GRIB2 download (~350 KB per file vs ~400 MB). More efficient but dependent on `.idx` index files being present on AWS S3. | Noted for reference |
 
 ---
 
@@ -303,7 +305,7 @@ Build steps:
 | Feature | Description |
 |---------|-------------|
 | ECMWF comparison | Head-to-head GFS vs ECMWF skill scores. Requires ECMWF open data API access. |
-| Additional variables | 10m wind speed, 500hPa geopotential height. base_fetcher architecture makes this a config change. |
+| Additional variables | 10m wind speed, 500hPa geopotential height are config changes plus minor fetcher additions. Precipitation requires additional skill scores such as ETS. |
 | Ensemble verification | GFS ensemble spread/skill relationship. Requires ensemble archive access. |
 | Seasonal breakdown | Skill scores stratified by season — winter vs summer performance differences. |
 | Extended domain | Add North Atlantic, North America as selectable regions via config. |
@@ -315,7 +317,7 @@ Build steps:
 
 | Source | What | Access | Cost |
 |--------|------|--------|------|
-| NOAA NOMADS | GFS forecast archive | Public HTTP, no key required | Free |
+| NOAA AWS S3 (noaa-gfs-bdp-pds) | GFS forecast archive | Public S3, no key required | Free |
 | Copernicus CDS | ERA5 reanalysis | Free account + API key required | Free |
 | Streamlit Community Cloud | Dashboard hosting | GitHub login | Free |
 
