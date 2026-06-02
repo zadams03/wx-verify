@@ -207,9 +207,13 @@ def render_date_range_selector(
     dashboard stays valid on every rerun.
     """
     st.markdown("**Analysis period**")
+    # Pre-seed session state on first render so the full period is the
+    # default.  Without this, st.date_input falls back to a 7-day window
+    # ending today regardless of the value= argument.
+    if key not in st.session_state:
+        st.session_state[key] = (min_date, max_date)
     result = st.date_input(
         "Select date range",
-        value=(min_date, max_date),
         min_value=min_date,
         max_value=max_date,
         key=key,
