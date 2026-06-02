@@ -327,9 +327,9 @@ Build steps:
 *Known UI/UX improvements identified post-v1.0. Address in a dedicated refinement session before adding new features.*
 
 - Interactive date range selector in sidebar — allow user to select a custom analysis period without editing config.
-- Intermediate gridlines on skill curves x-axis — add minor gridlines between the 5 labelled data points for easier reading.
-- Map trapezoidal border fix — region highlight rectangle renders as a trapezoid at high latitudes due to geographic projection; fix with proper great-circle segment rendering.
-- Skill curves chart width adjustment — chart feels narrower than the spatial map at default window width; review column proportions in `dashboard/app.py`.
+- Intermediate gridlines on skill curves x-axis — add minor gridlines between the 5 labelled data points for easier reading. ✓ Resolved — intermediate gridlines at 96h, 144h, 168h, 192h, 216h added as lighter shapes (width 0.5, opacity ~0.12) in `src/viz/skill_curves.py`; data-point gridlines unchanged.
+- Map trapezoidal border fix — region highlight rectangle renders as a trapezoid at high latitudes due to geographic projection; fix with proper great-circle segment rendering. ✓ Resolved — `_rect_path()` helper added to `src/viz/spatial_maps.py`; 50 intermediate points per edge ensure the border follows lines of constant latitude/longitude.
+- Skill curves chart width adjustment — chart feels narrower than the spatial map at default window width; review column proportions in `dashboard/app.py`. ✓ Resolved — column ratio changed from `[1, 1]` to `[3, 2]` in `dashboard/app.py`, giving the skill curves panel more horizontal space.
 
 ---
 

@@ -174,8 +174,8 @@ render_metric_cards(region_summary, lead_time_h)
 
 st.markdown("---")
 
-# Two-column layout: skill curves | spatial map
-col_left, col_right = st.columns([1, 1], gap="medium")
+# Two-column layout: skill curves | spatial map — 3:2 gives the chart more breathing room
+col_left, col_right = st.columns([3, 2], gap="medium")
 
 with col_left:
     fig_curves = build_skill_curves(region_summary, region_name)

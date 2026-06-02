@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -10,13 +11,14 @@ _COLOR_ACC = "#2ca02c"
 _COLOR_RMSE = "#d62728"
 _COLOR_BIAS = "#1f77b4"
 _COLOR_GRID = "rgba(180,180,180,0.25)"
+_COLOR_GRID_MINOR = "rgba(180,180,180,0.12)"
 _COLOR_THRESHOLD = "rgba(80,80,80,0.65)"
 
-# All 24h multiples from 24 to 240 — gridlines appear at each.
-# Labels shown only at the 5 data points; intermediate ticks are blank.
-_TICK_VALS = list(range(24, 241, 24))   # [24, 48, 72, 96, 120, 144, 168, 192, 216, 240]
-_DATA_POINT_SET = set(LEAD_TIMES)
-_TICK_TEXT = [f"{h}h" if h in _DATA_POINT_SET else "" for h in _TICK_VALS]
+# Data points get standard gridlines via tickvals.
+# Intermediate 24h multiples are drawn as lighter shapes below the traces.
+_TICK_VALS = [24, 48, 72, 120, 240]
+_TICK_TEXT = [f"{h}h" for h in _TICK_VALS]
+_INTERMEDIATE_GRIDLINES = [96, 144, 168, 192, 216]
 
 
 def build_skill_curves(
@@ -99,7 +101,19 @@ def build_skill_curves(
         bgcolor="rgba(255,255,255,0.75)",
     )
 
-    # X-axis: logarithmic. Gridlines at every 24h multiple; labels at data points only.
+    # Intermediate gridlines — lighter/thinner than the data-point gridlines.
+    # xref="x" on a log axis expects log10 of the data value.
+    for _h in _INTERMEDIATE_GRIDLINES:
+        fig.add_shape(
+            type="line",
+            x0=math.log10(_h), x1=math.log10(_h),
+            y0=0, y1=1,
+            xref="x", yref="paper",
+            line=dict(color=_COLOR_GRID_MINOR, width=0.5),
+            layer="below",
+        )
+
+    # X-axis: logarithmic. Standard gridlines at the 5 data points; labels at data points only.
     fig.update_xaxes(
         type="log",
         tickmode="array",

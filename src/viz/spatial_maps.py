@@ -50,6 +50,32 @@ _GEO_DEFAULTS = dict(
 )
 
 
+def _rect_path(
+    lat_min: float, lat_max: float, lon_min: float, lon_max: float, n: int = 50
+) -> tuple[list, list]:
+    """Dense lat/lon path for a rectangular region box.
+
+    Adds n intermediate points per edge so the boundary follows lines of
+    constant latitude/longitude rather than straight projected segments,
+    preventing the trapezoid distortion that appears at high latitudes.
+    """
+    lons_bot = np.linspace(lon_min, lon_max, n)
+    lats_right = np.linspace(lat_min, lat_max, n)
+    lons_top = np.linspace(lon_max, lon_min, n)
+    lats_left = np.linspace(lat_max, lat_min, n)
+    lats = np.concatenate([
+        np.full(n, lat_min), lats_right,
+        np.full(n, lat_max), lats_left,
+        [lat_min],
+    ])
+    lons = np.concatenate([
+        lons_bot, np.full(n, lon_max),
+        lons_top, np.full(n, lon_min),
+        [lon_min],
+    ])
+    return lats.tolist(), lons.tolist()
+
+
 def _color_range(da_vals: np.ndarray, metric: str) -> tuple[float, float]:
     valid = da_vals[~np.isnan(da_vals)]
     if metric == "acc":
@@ -126,10 +152,12 @@ def build_spatial_map(
         showlegend=False,
     ))
 
-    # Region highlight rectangle
+    # Region highlight — dense interpolation along each edge so the border
+    # follows lat/lon grid lines and renders as a rectangle at all latitudes.
     rb = region_bounds
-    rect_lats = [rb["lat_min"], rb["lat_max"], rb["lat_max"], rb["lat_min"], rb["lat_min"]]
-    rect_lons = [rb["lon_min"], rb["lon_min"], rb["lon_max"], rb["lon_max"], rb["lon_min"]]
+    rect_lats, rect_lons = _rect_path(
+        rb["lat_min"], rb["lat_max"], rb["lon_min"], rb["lon_max"]
+    )
     fig.add_trace(go.Scattergeo(
         lat=rect_lats,
         lon=rect_lons,
