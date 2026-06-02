@@ -1,9 +1,11 @@
 """wx-verify — Streamlit dashboard entry point (Phase 6, steps 34 & 38)."""
 from __future__ import annotations
 
+import datetime
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 import xarray as xr
@@ -18,6 +20,7 @@ from src.viz.components import (
     LEAD_TIMES,
     REGION_PRESETS,
     inject_card_styles,
+    render_date_range_selector,
     render_lead_time_selector,
     render_map_toggle,
     render_metric_cards,
@@ -27,6 +30,8 @@ from src.viz.skill_curves import build_skill_curves
 from src.viz.spatial_maps import build_spatial_map
 
 _METRICS_DIR = _REPO_ROOT / "data" / "processed" / "metrics"
+_FORECASTS_DIR = _REPO_ROOT / "data" / "processed" / "forecasts"
+_CLIM_FILE = _REPO_ROOT / "data" / "processed" / "climatology_t2m.nc"
 
 
 # ---------------------------------------------------------------------------
@@ -47,6 +52,70 @@ def _load_spatial(name: str) -> xr.DataArray | None:
     if not path.exists():
         return None
     return xr.open_dataset(path)[name]
+
+
+@st.cache_data
+def _load_aligned_all() -> xr.Dataset | None:
+    """Load and concatenate all aligned_*.nc files, sorted by init_time."""
+    files = sorted(_FORECASTS_DIR.glob("aligned_*.nc"))
+    if not files:
+        return None
+    datasets = [xr.open_dataset(f) for f in files]
+    if len(datasets) == 1:
+        return datasets[0]
+    combined = xr.concat(datasets, dim="init_time")
+    return combined.sortby("init_time")
+
+
+@st.cache_data
+def _load_climatology_da() -> xr.DataArray | None:
+    if not _CLIM_FILE.exists():
+        return None
+    return xr.open_dataset(_CLIM_FILE)["t2m"]
+
+
+@st.cache_data(show_spinner="Recomputing metrics for selected period…")
+def _recompute_spatial_for_window(
+    date_start: datetime.date,
+    date_end: datetime.date,
+) -> dict[str, xr.DataArray] | None:
+    """Filter aligned data to [date_start, date_end] and recompute bias/RMSE/ACC maps.
+
+    Returns dict with keys 'bias', 'rmse', 'acc', each a DataArray with dims
+    (lead_time, latitude, longitude), or None if no init_times fall in the window.
+    """
+    aligned = _load_aligned_all()
+    if aligned is None:
+        return None
+
+    t_start = np.datetime64(date_start)
+    t_end = np.datetime64(date_end) + np.timedelta64(1, "D")
+    mask = (aligned.init_time.values >= t_start) & (aligned.init_time.values < t_end)
+    if not mask.any():
+        return None
+
+    subset = aligned.isel(init_time=mask)
+    fc = subset["forecast"]
+    ob = subset["obs"]
+
+    diff = fc - ob
+    bias_da = diff.mean(dim="init_time")
+    rmse_da = np.sqrt((diff ** 2).mean(dim="init_time"))
+
+    clim = _load_climatology_da()
+    if clim is not None:
+        try:
+            from src.processing.climatology import compute_anomaly
+            from src.processing.metrics import compute_acc
+            fc_anom = compute_anomaly(fc, clim)
+            obs_anom = compute_anomaly(ob, clim)
+            acc_da = compute_acc(fc_anom, obs_anom)
+        except Exception:
+            acc_da = xr.full_like(bias_da, fill_value=float("nan"))
+    else:
+        acc_da = xr.full_like(bias_da, fill_value=float("nan"))
+
+    return {"bias": bias_da, "rmse": rmse_da, "acc": acc_da}
 
 
 def _compute_regional_summary(
@@ -110,6 +179,15 @@ spatial: dict[str, xr.DataArray | None] = {
 has_data = summary_df is not None
 has_spatial = any(v is not None for v in spatial.values())
 
+aligned_ds = _load_aligned_all()
+has_aligned = aligned_ds is not None
+if has_aligned:
+    _init_idx = pd.DatetimeIndex(aligned_ds.init_time.values)
+    data_min_date: datetime.date = _init_idx.normalize().min().date()
+    data_max_date: datetime.date = _init_idx.normalize().max().date()
+else:
+    data_min_date = data_max_date = None
+
 
 # ---------------------------------------------------------------------------
 # Sidebar
@@ -128,10 +206,15 @@ with st.sidebar:
 
     st.divider()
 
-    # Date range info (read from config)
+    if has_aligned:
+        date_start, date_end = render_date_range_selector(data_min_date, data_max_date)
+    else:
+        date_start = date_end = None
+        if cfg is not None:
+            st.markdown("**Data period**")
+            st.caption(f"{cfg.date_range.start} — {cfg.date_range.end}")
+
     if cfg is not None:
-        st.markdown("**Data period**")
-        st.caption(f"{cfg.date_range.start} — {cfg.date_range.end}")
         st.markdown("**Model**")
         st.caption(cfg.models.primary.upper())
         st.markdown("**Variable**")
@@ -163,9 +246,44 @@ lead_time_h = render_lead_time_selector()
 
 st.markdown("---")
 
-# Regional summary for selected region
-if has_spatial:
-    region_summary = _compute_regional_summary(spatial, region_bounds)
+# Determine whether date filtering is active
+date_filtering_active = (
+    has_aligned
+    and date_start is not None
+    and (date_start != data_min_date or date_end != data_max_date)
+)
+
+# Validate selected window and warn if too small
+if date_filtering_active:
+    t_s = np.datetime64(date_start)
+    t_e = np.datetime64(date_end) + np.timedelta64(1, "D")
+    n_times = int(
+        ((aligned_ds.init_time.values >= t_s) & (aligned_ds.init_time.values < t_e)).sum()
+    )
+    if n_times == 0:
+        st.warning(
+            "No forecast runs fall within the selected date range. "
+            "Showing full-period metrics.",
+            icon="⚠️",
+        )
+        date_filtering_active = False
+    elif n_times < 4:
+        st.warning(
+            f"Only {n_times} forecast run(s) in the selected window — "
+            "statistics may be unreliable with so few samples.",
+            icon="⚠️",
+        )
+
+# Resolve effective spatial source (filtered window or full-period pre-computed files)
+if date_filtering_active:
+    spatial_window = _recompute_spatial_for_window(date_start, date_end)
+    effective_spatial = spatial_window if spatial_window is not None else spatial
+else:
+    effective_spatial = spatial
+
+# Regional summary for selected region and period
+if any(v is not None for v in effective_spatial.values()):
+    region_summary = _compute_regional_summary(effective_spatial, region_bounds)
 else:
     region_summary = summary_df
 
@@ -182,7 +300,7 @@ with col_left:
     st.plotly_chart(fig_curves, width="stretch")
 
 with col_right:
-    spatial_da = spatial.get(map_metric)
+    spatial_da = effective_spatial.get(map_metric)
     if spatial_da is not None:
         fig_map = build_spatial_map(
             spatial_da, map_metric, lead_time_h, region_bounds, region_name

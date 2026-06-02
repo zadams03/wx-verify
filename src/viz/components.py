@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date as _date
+
 import pandas as pd
 import streamlit as st
 
@@ -12,6 +14,7 @@ __all__ = [
     "render_lead_time_selector",
     "render_region_selector",
     "render_map_toggle",
+    "render_date_range_selector",
 ]
 
 LEAD_TIMES = [24, 48, 72, 120, 240]
@@ -190,3 +193,34 @@ def render_map_toggle(key: str = "map_metric") -> str:
         key=key,
     )
     return labels[selected]
+
+
+def render_date_range_selector(
+    min_date: _date,
+    max_date: _date,
+    key: str = "date_range",
+) -> tuple[_date, _date]:
+    """Sidebar date range picker bounded by the available aligned data.
+
+    Returns (start_date, end_date). During intermediate selection (user has
+    picked start but not end), returns (start, max_date) so the rest of the
+    dashboard stays valid on every rerun.
+    """
+    st.markdown("**Analysis period**")
+    result = st.date_input(
+        "Select date range",
+        value=(min_date, max_date),
+        min_value=min_date,
+        max_value=max_date,
+        key=key,
+        label_visibility="collapsed",
+    )
+    if isinstance(result, (list, tuple)):
+        if len(result) == 2:
+            return result[0], result[1]
+        if len(result) == 1:
+            return result[0], max_date
+    # Single date object (edge case in some Streamlit versions)
+    if hasattr(result, "year"):
+        return result, max_date
+    return min_date, max_date
