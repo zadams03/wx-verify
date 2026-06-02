@@ -220,7 +220,6 @@ def render_date_range_selector(
             return result[0], result[1]
         if len(result) == 1:
             return result[0], max_date
-    # Single date object (edge case in some Streamlit versions)
     if hasattr(result, "year"):
         return result, max_date
     return min_date, max_date
