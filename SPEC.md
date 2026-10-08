@@ -129,46 +129,54 @@ Definitions (fixed from Phase 8):
 wx-verify/
 ├── SPEC.md                    ← This document. Always the source of truth.
 ├── README.md                  ← Public-facing project description
-├── requirements.txt           ← All Python dependencies
+├── requirements.txt           ← Deployment dependencies
+├── requirements-dev.txt       ← Test-only dependencies (pytest)
 ├── config.yaml                ← Single config file controlling all parameters
 │
 ├── data/
-│   ├── raw/
-│   │   ├── gfs/               ← Cached raw GFS GRIB2 files
-│   │   └── era5/              ← Cached raw ERA5 NetCDF files
-│   ├── processed/             ← gitignored from Phase 8
-│   │   └── aggregates/        ← Monthly sufficient statistics per model/variable/domain
-│   └── dashboard/             ← Committed. Small files the dashboard reads (see 4.4)
+│   ├── raw/                   ← gitignored. {source}/{domain}/{variable}_{YYYY-MM}.nc; deleted after aggregation
+│   │                            (except the one-off ERA5 climatology download)
+│   ├── processed/             ← gitignored
+│   │   ├── aggregates/        ← Monthly sufficient statistics + region sums per model/variable/domain
+│   │   └── climatology/       ← 1991–2020 normal by month and UTC hour, per variable/domain
+│   └── dashboard/             ← Committed. region_monthly.parquet, coverage.parquet, maps/ (see 4.4)
+│
+├── logs/                      ← gitignored. pipeline.log, pid file
 │
 ├── src/
+│   ├── pipeline.py            ← Resumable runner CLI (python -m src.pipeline)
 │   ├── data/
-│   │   ├── __init__.py
-│   │   ├── gfs_fetcher.py     ← GFS archive acquisition (AWS)
+│   │   ├── base_fetcher.py    ← Abstract base class — fetch_month(variable, domain, year, month)
+│   │   ├── registry.py        ← Variable registry: per-source field names and unit conversions
+│   │   ├── gfs_fetcher.py     ← GFS archive acquisition (AWS byte-range)
 │   │   ├── gfs_ncar_fetcher.py← GFS long record (NCAR RDA) — Phase 12
 │   │   ├── ecmwf_fetcher.py   ← ECMWF open data (AWS mirror) — Phase 9
-│   │   ├── era5_fetcher.py    ← ERA5 CDS API acquisition
-│   │   └── base_fetcher.py    ← Abstract base class — model-agnostic interface
+│   │   └── era5_fetcher.py    ← ERA5 hourly + monthly-by-hour climatology (CDS)
 │   │
 │   ├── processing/
-│   │   ├── __init__.py
-│   │   ├── alignment.py       ← Spatial/temporal alignment of forecast vs obs
-│   │   ├── metrics.py         ← RMSE, bias, ACC calculations
-│   │   └── climatology.py     ← Baseline climatology for ACC computation
+│   │   ├── alignment.py       ← Exact valid-time alignment; homogeneous-sample rule
+│   │   ├── climatology.py     ← 1991–2020 normal; anomalies by valid month and hour
+│   │   ├── metrics.py         ← Sufficient statistics; bias, RMSE, temporal/spatial (centred + uncentred) ACC
+│   │   ├── aggregate.py       ← Monthly aggregation, validation, atomic writes
+│   │   └── tables.py          ← Region, coverage and map tables for the dashboard
+│   │
+│   ├── utils/
+│   │   ├── config.py          ← Typed, validating config loader
+│   │   └── paths.py           ← All file paths in one place
 │   │
 │   └── viz/
-│       ├── __init__.py
 │       ├── skill_curves.py    ← Skill vs lead time plots
-│       ├── spatial_maps.py    ← Geographic error distribution maps
+│       ├── spatial_maps.py    ← Gridded error maps (Scattergeo), region zoom
 │       └── components.py      ← Reusable Streamlit UI components
 │
 ├── dashboard/
-│   └── app.py                 ← Streamlit entry point
+│   └── app.py                 ← Streamlit entry point (reads data/dashboard/ only)
 │
 ├── notebooks/
 │   └── exploration.ipynb      ← Scratch space — not part of dashboard
 │
-└── tests/
-    └── test_metrics.py        ← Unit tests for skill score calculations
+└── tests/                     ← test_config, test_metrics, test_processing, test_pipeline,
+                                 test_gfs_retry, test_viz, test_integration (skips without credentials/data)
 ```
 
 ### 4.2 Config System
@@ -227,7 +235,7 @@ Per-variable source mappings (GRIB short names, CDS names, unit conversions) liv
 | Component | Technology | Reason |
 |-----------|-----------|--------|
 | Language | Python 3.14 | Standard for scientific computing |
-| Data handling | xarray, pandas | Gridded and tabular data |
+| Data handling | xarray, pandas, pyarrow | Gridded data; parquet tables for the dashboard |
 | GFS / ECMWF data | cfgrib, requests (ecmwflibs on Windows only) | GRIB2 parsing and AWS S3 archive access (noaa-gfs-bdp-pds) |
 | ERA5 data | cdsapi | Official Copernicus CDS client |
 | Metrics | numpy, scipy | Skill score computation |
@@ -392,11 +400,20 @@ Build steps:
 53. Region-table and map-table builders (4.4 items 3–4), cos(lat)-weighted. Metric functions compute from sufficient statistics; existing unit tests updated and new tests added for weighting, pooling and spatial ACC against hand-computed values. ✓
 54. Pipeline runner: `python -m src.pipeline --model gfs --variable t2m --domain europe --start … --end …`. Resumable (skips completed months), logs progress, safe to leave running. ✓
 55. Dashboard reads only `data/dashboard/`. Sidebar selectors built from config: model, variable, domain → region, date range (month resolution). Model-version markers drawn on any time-based chart (none yet beyond the first). Selecting a region zooms the spatial map to that region's bounds (with a small margin); a toggle returns to the full-domain view with the region box. ✓
+55b. Dashboard notes for mountain regions (brought forward from Phase 10): a one-line terrain-mismatch caveat (3.8) whenever a mountain region is selected; and a note that centred ACC in small regions is lower than in large ones (the region-mean anomaly is removed), so the 0.6 line is reached at shorter leads.
+55c. Size-budget check: the table build warns (log + dashboard build summary) when committed data/dashboard/ exceeds `committed_size_budget_mb`.
 56. `requirements-dev.txt` with pytest. Integration tests skip cleanly when CDS credentials or raw data are absent (resolves 008). ✓
 57. Retire v1 data files and the on-the-fly recompute path (resolves 006, 007). Keep a copy of the v1 metric maps outside the repo until the step 59 regression check passes. ✓
 58. Run the full GFS T2m Europe period. Report runtime, raw disk peak, committed size vs budget. ✓
 59. Sanity checks: (a) regression — recompute 1–7 Jan 2023 grid-point bias and RMSE from the new aggregates and match the v1 maps (ACC and domain means will differ by design: new climatology, cos-lat weighting); (b) spot-check one grid point and one region by hand for one month; (c) confirm skill decreases with lead time and magnitudes are plausible against published GFS T2m skill.
 60. Spec vs build audit; dead code removal. Commit: "Phase 8 complete — generalised pipeline". ✓
+
+**Phase 8 build notes (Oct 2026 audit):**
+- Step 59(c): no published GFS-vs-ERA5 T2m skill by lead time for Europe could be found to compare against. Accepted on internal evidence instead: independent hand check of one grid point and the Alps region (Jan 2023) matched to 4–5 decimals; skill degrades monotonically with lead time in all 8 regions; Western Europe 24h RMSE stable at 1.38–1.45 °C in every year.
+- Fetch signature: runs come from config rather than being passed per call. The runner processes whole calendar months only.
+- ERA5T note shown when the selected window ends within ~100 days of today.
+- Additions beyond spec (approved): retry passes after transient network failures; raw-file purge on every code path, and deletion of raw files that fail validation; coverage table shown in the dashboard header; exact valid-time matching (v1 used nearest); float64 unit conversions.
+- Model-version markers: caption only until a time-based chart exists (Phase 12).
 
 ---
 
@@ -424,7 +441,7 @@ Build steps:
 67. Registry entries for `msl`, `z500`, `ws10`, `frzl`; enable in config. No new code paths beyond derived variables (`ws10`) and the freezing-level conversion.
 68. Enable `north_america_west` and the new region presets (3.4).
 69. Run all enabled combinations. Report committed size vs budget.
-70. Dashboard: variable selector, per-variable units/colour scales, terrain caveat shown for mountain regions.
+70. Dashboard: variable selector, per-variable units/colour scales; extend the mountain-region terrain caveat (55b) to freezing level and wind.
 71. Audit, commit: "Phase 10 complete — variables and North America".
 
 ---
