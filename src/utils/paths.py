@@ -41,17 +41,3 @@ def map_dir(model: str, variable: str, domain: str, comparison: str | None = Non
     if comparison:
         root = root / "compare" / comparison
     return root / model / variable / domain
-
-
-def resolve_map_file(model: str, variable: str, domain: str, year: int | str,
-                     comparison: str | None = None) -> Path:
-    """The yearly map file holding a model's statistics for ``comparison``.
-
-    Paired maps are written only for years whose paired run set differs from the
-    standalone one; when none exists, the standalone map *is* the paired one.
-    """
-    if comparison:
-        paired = map_dir(model, variable, domain, comparison) / f"{year}.nc"
-        if paired.exists():
-            return paired
-    return map_dir(model, variable, domain) / f"{year}.nc"

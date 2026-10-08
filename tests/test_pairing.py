@@ -11,6 +11,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
+from src.data.map_store import get_map_file
 from src import pipeline
 from src.processing import pairing, tables
 from src.processing.aggregate import aggregate_month, is_month_done, month_paths, runs_path
@@ -159,7 +160,7 @@ def test_identical_run_sets_reuse_standalone_aggregates(root, monkeypatch):
         pd.testing.assert_frame_equal(region_rows(CMP, m), region_rows("", m), check_dtype=False)
         # no duplicate paired map: the standalone one is the paired one
         assert not paths.map_dir(m, "t2m", "europe", CMP).exists()
-        assert paths.resolve_map_file(m, "t2m", "europe", 2023, CMP) == paths.map_dir(m, "t2m", "europe") / "2023.nc"
+        assert get_map_file(m, "t2m", "europe", 2023, CMP) == paths.map_dir(m, "t2m", "europe") / "2023.nc"
         with xr.open_dataset(paths.map_dir(m, "t2m", "europe") / "2023.nc") as ds:
             assert "comparison" not in ds.attrs
     cov = pd.read_parquet(paths.dashboard_dir() / "coverage.parquet")
@@ -202,10 +203,10 @@ def test_run_missing_for_one_model_is_removed_from_both(root, monkeypatch):
     assert (region_rows(CMP, "gfs")["n_forecasts"] == 2).all()
     assert (region_rows("", "gfs")["n_forecasts"] == 3).all()
     assert (region_rows(CMP, "ecmwf")["n_forecasts"] == 2).all()
-    with xr.open_dataset(paths.resolve_map_file("gfs", "t2m", "europe", 2023, CMP)) as ds:
+    with xr.open_dataset(get_map_file("gfs", "t2m", "europe", 2023, CMP)) as ds:
         assert ds.attrs["n_runs_included"] == 2 and ds.attrs["comparison"] == CMP
     # ECMWF lost nothing to the pairing, so its standalone map is its paired map
-    assert paths.resolve_map_file("ecmwf", "t2m", "europe", 2023, CMP) == paths.map_dir("ecmwf", "t2m", "europe") / "2023.nc"
+    assert get_map_file("ecmwf", "t2m", "europe", 2023, CMP) == paths.map_dir("ecmwf", "t2m", "europe") / "2023.nc"
     assert not paths.map_dir("ecmwf", "t2m", "europe", CMP).exists()
     with xr.open_dataset(paths.map_dir("gfs", "t2m", "europe") / "2023.nc") as ds:
         assert ds.attrs["n_runs_included"] == 3

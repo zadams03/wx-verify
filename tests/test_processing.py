@@ -331,7 +331,7 @@ class TestEra5Months:
 
 class TestSizeBudget:
     def _fill(self, root, n_bytes):
-        f = root / "dashboard" / "maps" / "x.bin"
+        f = root / "dashboard" / "tables" / "x.bin"
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_bytes(b"0" * n_bytes)
 
@@ -342,6 +342,13 @@ class TestSizeBudget:
         (tmp_path / "dashboard" / "a.parquet").write_bytes(b"0" * 500_000)
         assert tables.dashboard_size_mb() == pytest.approx(3.0)
 
+    def test_hosted_map_files_do_not_count(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(paths, "DATA_ROOT", tmp_path)
+        (tmp_path / "dashboard" / "maps" / "gfs").mkdir(parents=True)
+        (tmp_path / "dashboard" / "maps" / "gfs" / "2023.nc").write_bytes(b"0" * 9_000_000)
+        (tmp_path / "dashboard" / "a.parquet").write_bytes(b"0" * 500_000)
+        assert tables.dashboard_size_mb() == pytest.approx(0.5)
+
     def test_within_budget_logs_info(self, tmp_path, monkeypatch, caplog):
         monkeypatch.setattr(paths, "DATA_ROOT", tmp_path)
         self._fill(tmp_path, 1_000_000)
@@ -351,7 +358,7 @@ class TestSizeBudget:
         assert "1.0 MB of 150 MB budget" in caplog.text
         assert not [r for r in caplog.records if r.levelname == "WARNING"]
 
-    def test_over_budget_warns_and_points_to_cloud_hosting(self, tmp_path, monkeypatch, caplog):
+    def test_over_budget_warns(self, tmp_path, monkeypatch, caplog):
         monkeypatch.setattr(paths, "DATA_ROOT", tmp_path)
         self._fill(tmp_path, 3_000_000)
         with caplog.at_level("INFO", logger="src.processing.tables"):
@@ -359,7 +366,7 @@ class TestSizeBudget:
         assert not ok and size == pytest.approx(3.0)
         warnings = [r for r in caplog.records if r.levelname == "WARNING"]
         assert len(warnings) == 1 and "SIZE BUDGET EXCEEDED" in warnings[0].getMessage()
-        assert "cloud hosting" in warnings[0].getMessage()
+        assert "committed" in warnings[0].getMessage()
 
     def test_exactly_at_budget_is_within(self, tmp_path, monkeypatch):
         monkeypatch.setattr(paths, "DATA_ROOT", tmp_path)
@@ -369,15 +376,16 @@ class TestSizeBudget:
     def test_table_rebuild_reports_budget_in_the_pipeline_summary(self, tmp_path, monkeypatch, caplog):
         from dataclasses import replace
         from src import pipeline
-        from src.utils.config import DashboardConfig, load_config
+        from src.utils.config import load_config
         monkeypatch.setattr(paths, "DATA_ROOT", tmp_path)
         _write_month("2023-01", 3.0, tmp_path)
-        cfg = replace(load_config(), dashboard=DashboardConfig(map_resolution=0.25, committed_size_budget_mb=0.001))
+        cfg = load_config()
+        cfg = replace(cfg, dashboard=replace(cfg.dashboard, committed_size_budget_mb=0.001))
         with caplog.at_level("INFO"):
             pipeline._rebuild_tables(cfg)
         assert "Dashboard tables rebuilt" in caplog.text
         assert "SIZE BUDGET EXCEEDED" in caplog.text
-        ok_cfg = replace(cfg, dashboard=DashboardConfig(map_resolution=0.25, committed_size_budget_mb=150))
+        ok_cfg = replace(cfg, dashboard=replace(cfg.dashboard, committed_size_budget_mb=150))
         caplog.clear()
         with caplog.at_level("INFO"):
             pipeline._rebuild_tables(ok_cfg)

@@ -22,6 +22,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from src.data.map_store import MapUnavailable, get_map_file
 from src.processing.metrics import combine_stats, map_metrics, region_metrics
 from src.utils import paths
 from src.utils.config import comparison_models, load_config
@@ -79,8 +80,8 @@ def _load_map_stats(model: str, variable: str, domain: str, years: tuple[int, ..
     For a comparison, a year without its own paired map uses the standalone one."""
     parts = []
     for y in years:
-        f = paths.resolve_map_file(model, variable, domain, y, comparison or None)
-        if f.exists():
+        f = get_map_file(model, variable, domain, y, comparison or None)
+        if f is not None:
             with xr.open_dataset(f) as ds:
                 parts.append(ds.load().astype("float64"))
     return combine_stats(parts) if parts else None

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -113,6 +114,8 @@ class ClimatologyConfig:
 class DashboardConfig:
     map_resolution: float
     committed_size_budget_mb: float
+    maps_release_tag: str      # GitHub Release holding the map files (SPEC 4.4 item 5)
+    maps_repo: str             # owner/name of the repository whose release it is
 
 
 @dataclass(frozen=True)
@@ -373,12 +376,19 @@ def _parse_climatology(value: Any) -> ClimatologyConfig:
 
 def _parse_dashboard(value: Any) -> DashboardConfig:
     m = _require_mapping(value, "dashboard")
-    _require_keys(m, ("map_resolution", "committed_size_budget_mb"), "dashboard")
+    _require_keys(m, ("map_resolution", "committed_size_budget_mb", "maps_release_tag", "maps_repo"),
+                  "dashboard")
     res = _parse_number(m["map_resolution"], "dashboard.map_resolution")
     budget = _parse_number(m["committed_size_budget_mb"], "dashboard.committed_size_budget_mb")
     if res <= 0 or budget <= 0:
         raise ConfigError("dashboard.map_resolution and committed_size_budget_mb must be positive")
-    return DashboardConfig(map_resolution=res, committed_size_budget_mb=budget)
+    tag, repo = str(m["maps_release_tag"]), str(m["maps_repo"])
+    if not re.fullmatch(r"maps-\d{8}", tag):
+        raise ConfigError(f"dashboard.maps_release_tag must look like maps-YYYYMMDD, got {tag!r}")
+    if not re.fullmatch(r"[\w.-]+/[\w.-]+", repo):
+        raise ConfigError(f"dashboard.maps_repo must be owner/name, got {repo!r}")
+    return DashboardConfig(map_resolution=res, committed_size_budget_mb=budget,
+                           maps_release_tag=tag, maps_repo=repo)
 
 
 def parse_config(raw: Any) -> Config:

@@ -48,4 +48,8 @@ domains:
       "Rockies":           {lat_min: 37, lat_max: 55, lon_min: -120, lon_max: -104, mountain: true}
 
 climatology: {source: era5_monthly_by_hour, period: [1991, 2020]}
-dashboard:   {map_resolution: 0.25, committed_size_budget_mb: 150}
+dashboard:
+  map_resolution: 0.25
+  committed_size_budget_mb: 150
+  maps_release_tag: maps-20261008     # GitHub Release holding data/dashboard/maps (scripts/publish_maps.sh)
+  maps_repo: zadams03/wx-verify

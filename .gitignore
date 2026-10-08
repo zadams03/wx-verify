@@ -11,3 +11,4 @@ docs/*.txt
 .claude/settings.local.json
 data/processed/
 logs/
+data/dashboard/maps/

@@ -366,10 +366,14 @@ def _rebuild_tables(cfg: Config) -> None:
     from src.processing.tables import (
         build_coverage_table, build_map_tables, build_region_table, check_size_budget,
     )
+    from src.data.map_store import build_manifest
     try:
         build_region_table()
         build_coverage_table()
         build_map_tables(cfg.dashboard.map_resolution)
+        manifest = build_manifest(cfg)
+        logger.info("Map manifest: %d files, %.0f MB for release %s", len(manifest["files"]),
+                    manifest["total_bytes"] / 1e6, manifest["release_tag"])
         logger.info("Dashboard tables rebuilt in %s", paths.dashboard_dir())
         check_size_budget(cfg.dashboard.committed_size_budget_mb)
     except FileNotFoundError:

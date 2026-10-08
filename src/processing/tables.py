@@ -7,7 +7,7 @@
 Each table has a ``comparison`` key: "" for a model's own (standalone) statistics, or
 a name like "gfs_vs_ecmwf" for the paired-run statistics. Paired maps (maps/compare/{name}/…)
 are written only for years whose paired runs differ from the model's standalone runs;
-otherwise the standalone map is the paired one (paths.resolve_map_file).
+otherwise the standalone map is the paired one (map_store.get_map_file).
 
 Builders read only completed months (aggregate and region file both present), so they
 are safe to run while the pipeline is still writing later months.
@@ -48,24 +48,26 @@ def _complete_months() -> list:
 
 
 def dashboard_size_mb() -> float:
-    """Total size of the committed dashboard data folder in MB (1 MB = 1,000,000 bytes)."""
+    """Size of the committed dashboard data in MB (1 MB = 1,000,000 bytes): everything in
+    data/dashboard/ except maps/, whose files are hosted as release assets (SPEC 4.4)."""
     root = paths.dashboard_dir()
     if not root.exists():
         return 0.0
-    return sum(f.stat().st_size for f in root.rglob("*") if f.is_file()) / 1e6
+    maps = root / "maps"
+    return sum(f.stat().st_size for f in root.rglob("*") if f.is_file() and maps not in f.parents) / 1e6
 
 
 def check_size_budget(budget_mb: float) -> tuple[float, bool]:
     """Compare data/dashboard/ with the budget; log a warning when it is exceeded.
 
-    Returns (size_mb, within_budget). The remedy (SPEC 4.4 item 5 / Section 7) is to
-    move the map files to cloud hosting — resolution is not reduced to fit.
+    Returns (size_mb, within_budget). Map files are hosted on a GitHub Release and do not
+    count; resolution is never reduced to fit.
     """
     size = dashboard_size_mb()
     if size > budget_mb:
         logger.warning(
-            "SIZE BUDGET EXCEEDED: data/dashboard/ is %.1f MB, budget is %.0f MB — "
-            "move the map files to cloud hosting (SPEC Section 7) rather than reducing resolution",
+            "SIZE BUDGET EXCEEDED: committed data/dashboard/ is %.1f MB, budget is %.0f MB — "
+            "do not reduce map resolution to fit",
             size, budget_mb,
         )
         return size, False

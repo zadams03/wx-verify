@@ -8,6 +8,7 @@ import pytest
 pytest.importorskip("streamlit.testing.v1")
 from streamlit.testing.v1 import AppTest
 
+from src.data.map_store import get_map_file
 from src.utils import paths
 from src.viz.components import CENTRED_ACC_NOTE, TERRAIN_NOTE
 
@@ -166,7 +167,7 @@ def test_difference_map_matches_the_two_models_rmse_from_the_map_files():
     years = (2024, 2025, 2026)
     stats = {}
     for model in ("gfs", "ecmwf"):
-        parts = [xr.load_dataset(paths.resolve_map_file(model, "t2m", "europe", y, CMP)).astype("float64")
+        parts = [xr.load_dataset(get_map_file(model, "t2m", "europe", y, CMP)).astype("float64")
                  for y in years]
         stats[model] = sum(parts[1:], parts[0])
     diff = (map_metrics(stats["gfs"])["rmse"] - map_metrics(stats["ecmwf"])["rmse"]).sel(lead_time=24)
@@ -241,7 +242,7 @@ def test_acc_difference_map_is_ecmwf_minus_gfs_temporal_acc_from_the_paired_map_
 
     acc = {}
     for model in ("gfs", "ecmwf"):
-        parts = [xr.load_dataset(paths.resolve_map_file(model, "t2m", "europe", y, CMP)).astype("float64")
+        parts = [xr.load_dataset(get_map_file(model, "t2m", "europe", y, CMP)).astype("float64")
                  for y in (2024, 2025, 2026)]
         acc[model] = map_metrics(sum(parts[1:], parts[0]))["acc"].sel(lead_time=24)
     diff = acc["ecmwf"] - acc["gfs"]                                                 # positive = ECMWF better
