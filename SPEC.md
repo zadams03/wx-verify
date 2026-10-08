@@ -107,7 +107,7 @@ Definitions (fixed from Phase 8):
 - **Region/domain means are area-weighted by cos(latitude)** and pooled over all grid points and forecasts (RMSE = √ of pooled weighted MSE). v1 used unweighted means of grid-point values.
 - **Two ACCs, labelled clearly:**
   - *Skill curves and metric cards:* spatial ACC computed per forecast over the region, then averaged over forecasts. This is the operational convention (and the basis of the 0.6 threshold). Both the **centred** form (area-mean anomaly removed from forecast and ERA5 before correlating — the WMO standard form, to be confirmed in the Phase 8 learning checkpoint) and the uncentred form (v1) are stored; the dashboard shows centred.
-  - *Spatial maps:* temporal ACC at each grid point (the v1 definition). At the 0.5° map resolution it is a pooled correlation over the four 0.25° points and all forecasts in each cell; bias and RMSE are exact pooled values.
+  - *Spatial maps:* temporal ACC at each grid point (the v1 definition). 
 - Precipitation thresholds: 1, 5, 10 mm/24h (config).
 - **Homogeneous sample:** a forecast run is included only if every configured lead time has both forecast and ERA5 data, so every point on a skill curve uses the same set of forecasts. In head-to-head views, only runs available for both models are used. Excluded runs are logged and counted.
 
@@ -217,7 +217,7 @@ domains:
     regions: {}                 # as Section 3.4
 
 climatology: {source: era5_monthly_by_hour, period: [1991, 2020]}
-dashboard:   {map_resolution: 0.5, committed_size_budget_mb: 150}
+dashboard:   {map_resolution: 0.25, committed_size_budget_mb: 150}
 ```
 
 Per-variable source mappings (GRIB short names, CDS names, unit conversions) live in a variable registry in code, keyed by the config keys above — config chooses *what* runs, the registry knows *how* to fetch each variable from each source.
@@ -245,7 +245,7 @@ Goal: least disk space, exact metrics for any date window, and a small committed
 1. **Raw** (`data/raw/{source}/{domain}/…`, gitignored): only the configured domains, only 00z/12z. GFS global fields are subset to each domain in memory at fetch time. Deleted after aggregation when `keep_raw: false`.
 2. **Monthly aggregates** (`data/processed/aggregates/{model}/{variable}/{domain}/{YYYY-MM}.nc`, gitignored): per grid point and lead time, the sufficient statistics — count, Σe, Σe², Σf′, Σo′, Σf′², Σo′², Σf′o′ (e = forecast − ERA5, ′ = anomaly vs climatology); for precipitation, contingency counts (hits, misses, false alarms, correct negatives) per threshold. Any date window's grid-point bias/RMSE/temporal ACC is an exact sum over months.
 3. **Region tables** (`data/dashboard/region_monthly.parquet`, committed): per model × variable × region × lead time × month — area-weighted pooled sums for bias/RMSE, the sum and count of per-forecast spatial ACC, and pooled contingency counts. Skill curves and metric cards are exact for any month window.
-4. **Map tables** (`data/dashboard/maps/…`, committed): the same grid-point sufficient statistics summed per **year**, coarsened to 0.5°, float32 + zlib. Maps for a selected window use the whole years it covers; the dashboard states this.
+4. **Map tables** (`data/dashboard/maps/…`, committed): grid-point statistics summed per **year** at native 0.25°, float32 + zlib, storing only what the maps need (n, Σe, Σe², Σf′², Σo′², Σf′o′ — n may be stored per lead time if constant). Maps for a selected window use the whole years it covers; the dashboard states this. Resolution is never reduced to meet the budget; map files move to cloud hosting instead.
 5. **Size budget:** committed `data/dashboard/` ≤ 150 MB (config). Each phase reports actual size. If exceeded, fall back to cloud hosting (Section 7).
 
 Consequences:
@@ -391,7 +391,7 @@ Build steps:
 52. Aggregation module: align → anomalies → monthly sufficient statistics (4.4 item 2). Validate before writing. Delete raw for that month when `keep_raw: false`.
 53. Region-table and map-table builders (4.4 items 3–4), cos(lat)-weighted. Metric functions compute from sufficient statistics; existing unit tests updated and new tests added for weighting, pooling and spatial ACC against hand-computed values.
 54. Pipeline runner: `python -m src.pipeline --model gfs --variable t2m --domain europe --start … --end …`. Resumable (skips completed months), logs progress, safe to leave running.
-55. Dashboard reads only `data/dashboard/`. Sidebar selectors built from config: model, variable, domain → region, date range (month resolution). Model-version markers drawn on any time-based chart (none yet beyond the first).
+55. Dashboard reads only `data/dashboard/`. Sidebar selectors built from config: model, variable, domain → region, date range (month resolution). Model-version markers drawn on any time-based chart (none yet beyond the first). Selecting a region zooms the spatial map to that region's bounds (with a small margin); a toggle returns to the full-domain view with the region box.
 56. `requirements-dev.txt` with pytest. Integration tests skip cleanly when CDS credentials or raw data are absent (resolves 008).
 57. Retire v1 data files and the on-the-fly recompute path (resolves 006, 007). Keep a copy of the v1 metric maps outside the repo until the step 59 regression check passes.
 58. Run the full GFS T2m Europe period. Report runtime, raw disk peak, committed size vs budget.
