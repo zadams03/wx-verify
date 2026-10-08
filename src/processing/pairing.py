@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 import pandas as pd
+import xarray as xr
 
 from src.data.byterange import ByteRangeFetcher
 from src.processing.aggregate import month_paths, runs_path
@@ -50,7 +51,6 @@ def included_runs(cfg: Config, fetcher: ByteRangeFetcher, variable: str, domain:
         df = pd.read_parquet(rp)
         return pd.DatetimeIndex(df.loc[df["status"] == "included", "init_time"])
 
-    import xarray as xr
     nc, _ = month_paths(model, variable, domain, month)
     year, mon = int(month[:4]), int(month[5:])
     scheduled = scheduled_runs(cfg, fetcher, year, mon)

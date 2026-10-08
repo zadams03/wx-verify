@@ -7,6 +7,7 @@ validation — is common, so every model behaves identically.
 """
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import tempfile
@@ -14,7 +15,6 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime
 from pathlib import Path
-import logging
 
 import numpy as np
 import requests

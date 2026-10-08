@@ -3,7 +3,6 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from src.utils.config import Bounds
 
 __all__ = [
     "CARD_STYLES",
@@ -15,7 +14,6 @@ __all__ = [
     "inject_card_styles",
     "render_metric_cards",
     "render_lead_time_selector",
-    "render_region_selector",
     "render_map_toggle",
     "render_map_view_toggle",
     "render_month_range_selector",
@@ -176,18 +174,6 @@ def render_lead_time_selector(lead_times: list[int], key: str = "lt") -> int:
     if selected is None:
         return lead_times[0]
     return int(selected.replace("h", ""))
-
-
-def render_region_selector(
-    regions: dict[str, Bounds], key: str = "region"
-) -> tuple[str, dict[str, float]]:
-    """Dropdown region selector over config regions. Returns (region_name, bounds_dict)."""
-    region_name = st.selectbox("Region", list(regions), key=key)
-    b = regions[region_name]
-    return region_name, {
-        "lat_min": b.lat_min, "lat_max": b.lat_max,
-        "lon_min": b.lon_min, "lon_max": b.lon_max,
-    }
 
 
 def render_map_toggle(key: str = "map_metric") -> str:
