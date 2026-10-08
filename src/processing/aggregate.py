@@ -96,7 +96,7 @@ def validate_aggregate(agg: MonthAggregate, tol: float = 1e-9) -> None:
     if (np.abs(s["sum_fao"].values) > np.sqrt(s["sum_fa2"].values * s["sum_oa2"].values) * (1 + 1e-6) + tol).any():
         raise ValueError("|Σf′o′| exceeds √(Σf′²Σo′²) — Cauchy–Schwarz violated")
     r = agg.regions
-    if r.empty or not np.isfinite(r[["sum_w", "sum_we", "sum_we2", "acc_sum"]].values).all():
+    if r.empty or not np.isfinite(r[["sum_w", "sum_we", "sum_we2", "acc_sum", "acc_c_sum"]].values).all():
         raise ValueError("Region table empty or non-finite")
     if (r["n_forecasts"] != c["n_runs_included"]).any():
         raise ValueError("Region forecast count differs from included runs")

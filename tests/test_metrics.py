@@ -203,6 +203,46 @@ class TestRegion:
         assert m["acc"].item() == pytest.approx(0.9)
         assert m["n_forecasts"].item() == 2
 
+    def test_centred_acc_known_value_unweighted(self):
+        """fa=[1,2,3], oa=[1,3,2], equal weights. Means are 2 and 2, so centred
+        anomalies are [-1,0,1] and [-1,1,0]: num=1, d1=2, d2=2 → 0.5.
+        Uncentred: num=1+6+6=13, d1=d2=14 → 13/14."""
+        fa = _da(np.array([1.0, 2.0, 3.0]).reshape(1, 1, 3, 1), lons=[0.0])
+        oa = _da(np.array([1.0, 3.0, 2.0]).reshape(1, 1, 3, 1), lons=[0.0])
+        w = xr.ones_like(region_weights(fa.latitude, fa.longitude, Bounds(-1, 3, -1, 1)))
+        m = region_metrics(region_stats(fa, oa, fa, oa, w))
+        assert m["acc_c"].item() == pytest.approx(0.5)
+        assert m["acc"].item() == pytest.approx(13 / 14)
+
+    def test_centred_acc_weighted_known_value(self):
+        """lats 0 (w=1) and 60 (w=.5), fa=[1,2], oa=[2,1]. Weighted means 4/3 and 5/3
+        give deviations [-1/3, 2/3] and [1/3, -2/3]: exactly anti-correlated → -1,
+        while the uncentred form is 3/√13.5 ≈ 0.816."""
+        fa = self._single_lon([[[1, 2]]])
+        oa = self._single_lon([[[2, 1]]])
+        w = region_weights(fa.latitude, fa.longitude, Bounds(-1, 61, -1, 1))
+        m = region_metrics(region_stats(fa, oa, fa, oa, w))
+        assert m["acc_c"].item() == pytest.approx(-1.0)
+        assert m["acc"].item() == pytest.approx(3 / np.sqrt(13.5))
+
+    def test_centred_acc_ignores_uniform_offset(self):
+        """A uniform anomaly offset changes the uncentred ACC but not the centred one."""
+        fa = _da(np.array([1.0, 2.0, 3.0]).reshape(1, 1, 3, 1), lons=[0.0])
+        oa = _da(np.array([1.0, 3.0, 2.0]).reshape(1, 1, 3, 1), lons=[0.0])
+        w = xr.ones_like(region_weights(fa.latitude, fa.longitude, Bounds(-1, 3, -1, 1)))
+        base = region_metrics(region_stats(fa, oa, fa, oa, w))
+        shifted = region_metrics(region_stats(fa, oa, fa + 5.0, oa, w))
+        assert shifted["acc_c"].item() == pytest.approx(base["acc_c"].item())
+        assert shifted["acc"].item() != pytest.approx(base["acc"].item())
+
+    def test_centred_acc_undefined_for_uniform_forecast_anomaly(self):
+        fa = _da(np.full((1, 1, 3, 1), 2.0), lons=[0.0])
+        oa = _da(np.array([1.0, 3.0, 2.0]).reshape(1, 1, 3, 1), lons=[0.0])
+        w = xr.ones_like(region_weights(fa.latitude, fa.longitude, Bounds(-1, 3, -1, 1)))
+        m = region_metrics(region_stats(fa, oa, fa, oa, w))
+        assert np.isnan(m["acc_c"].item())
+        assert np.isfinite(m["acc"].item())
+
     def test_undefined_acc_forecast_is_skipped(self):
         fa = _da(np.array([[0.0, 0.0], [1.0, 2.0]]).reshape(2, 1, 2, 1), lons=[0.0])
         oa = _da(np.array([[1.0, 1.0], [1.0, 2.0]]).reshape(2, 1, 2, 1), lons=[0.0])

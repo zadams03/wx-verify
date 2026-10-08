@@ -15,7 +15,8 @@ import pandas as pd
 import xarray as xr
 
 STAT_VARS = ("n", "sum_e", "sum_e2", "sum_fa", "sum_oa", "sum_fa2", "sum_oa2", "sum_fao")
-REGION_SUM_COLS = ("n_forecasts", "sum_w", "sum_we", "sum_we2", "acc_sum", "acc_count")
+REGION_SUM_COLS = ("n_forecasts", "sum_w", "sum_we", "sum_we2",
+                   "acc_sum", "acc_count", "acc_c_sum", "acc_c_count")
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +111,20 @@ def region_stats(
     d2 = (wok * oa ** 2).sum(spatial)
     denom = np.sqrt(d1 * d2)
     acc = num / denom.where(denom > 0)           # (init_time, lead_time)
-    in_region = wok.sum(spatial) > 0
+    sw = wok.sum(spatial)
+    in_region = sw > 0
+
+    # Centred: Σw(f′−f̄)(o′−ō) = Σw f′o′ − Σw f′ · Σw o′ / Σw, and likewise for the squares.
+    sfa = (wok * fa).sum(spatial)
+    soa = (wok * oa).sum(spatial)
+    safe_sw = sw.where(in_region)
+    num_c = num - sfa * soa / safe_sw
+    d1_c = d1 - sfa ** 2 / safe_sw
+    d2_c = d2 - soa ** 2 / safe_sw
+    denom_c = np.sqrt(d1_c.clip(min=0) * d2_c.clip(min=0))
+    # Rounding can leave a zero-variance field at ~1e-16 instead of 0.
+    tiny = 1e-12 * (1 + d1 * d2) ** 0.5
+    acc_c = num_c / denom_c.where(denom_c > tiny)
 
     return pd.DataFrame({
         "lead_time_h": forecast.lead_time.values.astype(int),
@@ -120,6 +134,8 @@ def region_stats(
         "sum_we2": (wok * e ** 2).sum(("init_time",) + spatial).values,
         "acc_sum": acc.sum("init_time", skipna=True).values,
         "acc_count": acc.notnull().sum("init_time").values.astype(int),
+        "acc_c_sum": acc_c.sum("init_time", skipna=True).values,
+        "acc_c_count": acc_c.notnull().sum("init_time").values.astype(int),
     })
 
 
@@ -127,13 +143,15 @@ def region_metrics(table: pd.DataFrame) -> pd.DataFrame:
     """Bias, RMSE and mean spatial ACC per lead time from region-table rows.
 
     ``table`` may hold many months (a window): sums are pooled exactly.
-    Returns columns lead_time_h, n_forecasts, bias, rmse, acc.
+    Returns columns lead_time_h, n_forecasts, bias, rmse, acc_c (centred, shown on the
+    dashboard) and acc (uncentred).
     """
     g = table.groupby("lead_time_h")[list(REGION_SUM_COLS)].sum()
     out = pd.DataFrame({
         "n_forecasts": g["n_forecasts"],
         "bias": g["sum_we"] / g["sum_w"].where(g["sum_w"] > 0),
         "rmse": np.sqrt(g["sum_we2"] / g["sum_w"].where(g["sum_w"] > 0)),
+        "acc_c": g["acc_c_sum"] / g["acc_c_count"].where(g["acc_c_count"] > 0),
         "acc": g["acc_sum"] / g["acc_count"].where(g["acc_count"] > 0),
     })
     return out.reset_index()
