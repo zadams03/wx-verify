@@ -89,14 +89,22 @@ class FakeGFS:
 
 
 class FakeERA5:
+    batches: list = []
+
     def __init__(self, cfg):
         pass
 
     def raw_path(self, variable, domain, year, month):
         return paths.raw_dir("era5", domain) / f"{variable}_{year:04d}-{month:02d}.nc"
 
-    def fetch_month(self, variable, domain, year, month, hours=None):
+    def fetch_month(self, variable, domain, year, month, hours=None, batch=None):
         return _touch("era5", f"{variable}_{year:04d}-{month:02d}.nc")
+
+    def ensure_months(self, variables, domain, months, hours):
+        FakeERA5.batches.append((list(variables), list(months)))
+        for v in variables:
+            for y, m in months:
+                _touch("era5", f"{v}_{y:04d}-{m:02d}.nc")
 
     def validate(self, path, variable, domain, year=None, month=None):
         pass
@@ -196,6 +204,7 @@ def table_calls(root, monkeypatch):
     calls = {"tables": 0, "months": 0}
     monkeypatch.setattr(pipeline, "_rebuild_tables", lambda cfg: calls.__setitem__("tables", calls["tables"] + 1))
     monkeypatch.setattr(pipeline, "_setup_logging", lambda: None)
+    monkeypatch.setattr(pipeline, "ERA5Fetcher", FakeERA5)
 
     def fake_month(*a, **k):
         calls["months"] += 1

@@ -35,8 +35,8 @@ def test_repo_config_loads():
     assert cfg.lead_times_hours == [24, 48, 72, 120, 240]
     assert cfg.runs == ["00", "12"]
     assert cfg.enabled_models() == ["gfs", "ecmwf"]
-    assert cfg.enabled_variables() == ["t2m"]
-    assert cfg.enabled_domains() == ["europe"]
+    assert cfg.enabled_variables() == ["t2m", "msl", "z500", "ws10", "frzl"]
+    assert cfg.enabled_domains() == ["europe", "north_america_west"]
     assert cfg.models["gfs"].start == date(2021, 3, 23)
     assert cfg.models["gfs"].end == date(2026, 9, 20)
     assert cfg.models["ecmwf"].start == date(2024, 2, 1)
@@ -105,7 +105,7 @@ def test_source_start_after_end(raw):
 
 def test_enabled_variable_not_in_registry(raw):
     def m(d):
-        d["variables"]["msl"]["enabled"] = True
+        d["variables"]["tp24"]["enabled"] = True
     with pytest.raises(ConfigError, match="not in the variable registry"):
         parse_config(_broken(raw, m))
 
@@ -218,7 +218,7 @@ def test_registry_t2m_fields():
     spec = get_variable("t2m")
     assert spec.gfs.idx_name == "TMP"
     assert spec.gfs.idx_level == "2 m above ground"
-    assert spec.era5.cds_name == "2m_temperature"
+    assert spec.era5.cds_names == ("2m_temperature",)
     assert spec.source_field("gfs") is spec.gfs
     assert spec.source_field("era5") is spec.era5
 
@@ -242,3 +242,33 @@ def test_registry_missing_source():
 def test_every_enabled_config_variable_is_registered():
     cfg = load_config()
     assert set(cfg.enabled_variables()) <= set(VARIABLES)
+
+
+def test_registry_phase10_conversions():
+    assert get_variable("msl").gfs.conversion.apply(101325.0) == pytest.approx(1013.25)
+    assert get_variable("msl").era5.conversion.apply(101325.0) == pytest.approx(1013.25)
+    # ERA5 geopotential (m² s⁻²) → geopotential height (m)
+    assert get_variable("z500").era5.conversion.apply(5.5 * 9.80665e4) == pytest.approx(5.5e3 * 10)
+    assert get_variable("z500").gfs.conversion.apply(5500.0) == 5500.0
+
+
+def test_registry_wind_speed_is_two_component_field():
+    spec = get_variable("ws10")
+    for src in ("gfs", "ecmwf"):
+        parts = spec.source_field(src).parts
+        assert len(parts) == 2
+    assert [p.idx_name for p in spec.gfs.parts] == ["UGRD", "VGRD"]
+    assert [p.param for p in spec.ecmwf.parts] == ["10u", "10v"]
+    assert spec.era5.derive == "speed" and spec.era5.climatology == "hourly"
+
+
+def test_registry_freezing_level_is_gfs_only_and_masked():
+    spec = get_variable("frzl")
+    assert spec.ecmwf is None and spec.gfs.idx_level == "0C isotherm"
+    assert spec.masked and spec.era5.climatology is None
+    assert not get_variable("t2m").masked
+
+
+def test_config_freezing_level_has_no_acc():
+    v = load_config().variables["frzl"]
+    assert v.scores == ["bias", "rmse"] and v.models == ["gfs"]

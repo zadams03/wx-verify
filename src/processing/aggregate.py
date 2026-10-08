@@ -35,18 +35,24 @@ class MonthAggregate:
     regions: pd.DataFrame      # one row per region × lead time
     counts: dict[str, int]     # run inclusion / exclusion counts
     runs: pd.DataFrame         # init_time × status: included | forecast_missing | era5_missing
+    masked: bool = False       # sample varies by point/time (freezing level): n may be below the run count
 
 
 def aggregate_month(
     forecast: xr.DataArray,
     era5: xr.DataArray,
-    clim: xr.DataArray,
+    clim: xr.DataArray | None,
     regions: dict[str, Bounds],
     ident: dict[str, str],
+    masked: bool = False,
 ) -> MonthAggregate:
     """Aggregate one month. ``ident`` supplies model, variable, domain, month (YYYY-MM).
 
     Only runs with every lead time present in both forecast and ERA5 are used.
+    ``clim`` None means the variable has no anomaly score: anomalies are zero, so the
+    ACC sums are zero and ACC comes out undefined. ``masked``: ERA5 is NaN at points
+    outside the verification sample (freezing level); those points drop out of every
+    sum and the region table records the unmasked weight in ``sum_w_all``.
     """
     fc, obs, obs_present = align(forecast, era5)
     keep, counts, excluded = homogeneous_runs(forecast["present"], obs_present)
@@ -59,8 +65,11 @@ def aggregate_month(
     obs = obs.isel(init_time=keep.values)
     validate_aligned(fc, obs)
 
-    fc_anom = compute_anomaly(fc, clim, fc.valid_time)
-    obs_anom = compute_anomaly(obs, clim, obs.valid_time)
+    if clim is None:
+        fc_anom, obs_anom = xr.zeros_like(fc), xr.zeros_like(obs)
+    else:
+        fc_anom = compute_anomaly(fc, clim, fc.valid_time)
+        obs_anom = compute_anomaly(obs, clim, obs.valid_time)
     stats = sufficient_stats(fc, obs, fc_anom, obs_anom)
 
     frames = []
@@ -77,7 +86,7 @@ def aggregate_month(
     region_df = pd.concat(frames, ignore_index=True)
     for key in ("month", "domain", "variable", "model"):
         region_df.insert(0, key, ident[key])
-    return MonthAggregate(stats=stats, regions=region_df, counts=counts, runs=runs)
+    return MonthAggregate(stats=stats, regions=region_df, counts=counts, runs=runs, masked=masked)
 
 
 def validate_aggregate(agg: MonthAggregate, tol: float = 1e-9) -> None:
@@ -91,12 +100,16 @@ def validate_aggregate(agg: MonthAggregate, tol: float = 1e-9) -> None:
         if not np.isfinite(s[name].values).all():
             raise ValueError(f"Non-finite values in '{name}'")
     n = s["n"].values
-    if n.min() != n.max() or int(n.max()) != c["n_runs_included"]:
+    if agg.masked:
+        if n.min() < 0 or n.max() > c["n_runs_included"]:
+            raise ValueError(f"n ranges {n.min()}..{n.max()} but only {c['n_runs_included']} runs included")
+    elif n.min() != n.max() or int(n.max()) != c["n_runs_included"]:
         raise ValueError(
             f"Sample not homogeneous: n ranges {n.min()}..{n.max()} vs "
             f"{c['n_runs_included']} included runs"
         )
-    mean_e, mean_e2 = s["sum_e"].values / n, s["sum_e2"].values / n
+    with np.errstate(invalid="ignore", divide="ignore"):      # n is 0 at points the mask excludes
+        mean_e, mean_e2 = s["sum_e"].values / n, s["sum_e2"].values / n
     if (mean_e2 < mean_e ** 2 - 1e-6 * (1 + mean_e2)).any():
         raise ValueError("Σe²/n < (Σe/n)² — impossible, statistics are corrupt")
     if (np.abs(s["sum_fao"].values) > np.sqrt(s["sum_fa2"].values * s["sum_oa2"].values) * (1 + 1e-6) + tol).any():
@@ -104,7 +117,8 @@ def validate_aggregate(agg: MonthAggregate, tol: float = 1e-9) -> None:
     r = agg.regions
     if r.empty or not np.isfinite(r[["sum_w", "sum_we", "sum_we2", "acc_sum", "acc_c_sum"]].values).all():
         raise ValueError("Region table empty or non-finite")
-    if (r["n_forecasts"] != c["n_runs_included"]).any():
+    if (r["n_forecasts"] > c["n_runs_included"]).any() or (
+            not agg.masked and (r["n_forecasts"] != c["n_runs_included"]).any()):
         raise ValueError("Region forecast count differs from included runs")
     status = agg.runs["status"].value_counts()
     if (len(agg.runs) != c["n_runs_total"] or status.get("included", 0) != c["n_runs_included"]
@@ -112,7 +126,7 @@ def validate_aggregate(agg: MonthAggregate, tol: float = 1e-9) -> None:
             or status.get("era5_missing", 0) != c["n_excluded_era5_missing"]
             or agg.runs["init_time"].duplicated().any()):
         raise ValueError("Run list does not match the run counts")
-    if (r["sum_w"] <= 0).any() or (r["sum_we2"] < 0).any():
+    if (r["sum_w"] < 0).any() or (r["sum_we2"] < 0).any() or (not agg.masked and (r["sum_w"] <= 0).any()):
         raise ValueError("Region weights/sums out of range")
 
 

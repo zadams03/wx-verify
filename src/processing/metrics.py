@@ -130,6 +130,7 @@ def region_stats(
         "lead_time_h": forecast.lead_time.values.astype(int),
         "n_forecasts": in_region.sum("init_time").values.astype(int),
         "sum_w": wok.sum(("init_time",) + spatial).values,
+        "sum_w_all": np.full(forecast.sizes["lead_time"], float(w.sum()) * forecast.sizes["init_time"]),
         "sum_we": (wok * e).sum(("init_time",) + spatial).values,
         "sum_we2": (wok * e ** 2).sum(("init_time",) + spatial).values,
         "acc_sum": acc.sum("init_time", skipna=True).values,
@@ -137,6 +138,18 @@ def region_stats(
         "acc_c_sum": acc_c.sum("init_time", skipna=True).values,
         "acc_c_count": acc_c.notnull().sum("init_time").values.astype(int),
     })
+
+
+def masked_fraction(table: pd.DataFrame) -> float:
+    """Fraction of region-weight excluded by the verification mask (0 for unmasked variables).
+
+    Rows written before ``sum_w_all`` existed have NaN there and count as unmasked.
+    """
+    if "sum_w_all" not in table:
+        return 0.0
+    ok = table["sum_w_all"].notna()
+    total = table.loc[ok, "sum_w_all"].sum()
+    return float(1 - table.loc[ok, "sum_w"].sum() / total) if total > 0 else 0.0
 
 
 def region_metrics(table: pd.DataFrame) -> pd.DataFrame:
