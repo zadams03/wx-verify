@@ -218,6 +218,7 @@ domains:
     enabled: true
     regions:
       "Western Europe": {lat_min: 35, lat_max: 65, lon_min: -15, lon_max: 25}
+      "European Alps":  {lat_min: 43.5, lat_max: 48.5, lon_min: 5, lon_max: 16.5, mountain: true}   # mountain: true shows the terrain caveat
       # ... remaining presets as Section 3.4
   north_america_west:
     bounds: {lat_min: 36, lat_max: 62, lon_min: -140, lon_max: -102}
