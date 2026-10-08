@@ -60,9 +60,9 @@ This project is explicitly a learning exercise in parallel with a portfolio deli
 ### 3.2 Models
 | Model | Source | Period | Notes |
 |---|---|---|---|
-| GFS | NOAA AWS S3 (`noaa-gfs-bdp-pds`) | 2021-03-22 → 2026-09-30 | Starts at GFS v16 implementation. Byte-range downloads via `.idx`. |
+| GFS | NOAA AWS S3 (`noaa-gfs-bdp-pds`) | 2021-03-23 → 2026-09-20 | First full day of GFS v16 (v16 began 2021-03-22 12z; earlier runs use a different S3 layout). Byte-range downloads via `.idx`, exact field-name match. |
 | GFS (long record) | NCAR RDA `d084001` | 2015-01-15 → 2021-03-21 | Phase 12. Same 0.25° grids. Access method verified at Phase 12 kickoff. |
-| ECMWF IFS HRES | ECMWF open data, AWS mirror | 2024-02-01 → 2026-09-30 | 0.25° from 1 Feb 2024 (0.4° before — excluded). |
+| ECMWF IFS HRES | ECMWF open data, AWS mirror | 2024-02-01 → 2026-09-20 | 0.25° from 1 Feb 2024 (0.4° before — excluded). |
 
 - Runs: **00z and 12z only** (ECMWF open data only goes to 240h+ from these runs; halves volume).
 - Model upgrades within the record are recorded in config (`model_versions`) and marked on all time-based views — see 3.8.
@@ -88,8 +88,8 @@ Region boxes reviewed and confirmed by Zac (Oct 2026). Known overlaps (Western C
 - All lead-time-dependent code (axes, ticks, gridlines, selectors) reads `lead_times_hours` from config — single source.
 
 ### 3.6 Date Range
-- GFS: 2021-03-22 → 2026-09-30 (Phases 8–11), extended back to 2015-01-15 in Phase 12.
-- ECMWF: 2024-02-01 → 2026-09-30.
+- Dates are **initialisation** dates. GFS: 2021-03-23 → 2026-09-20 (Phases 8–11), extended back to 2015-01-15 in Phase 12. ECMWF: 2024-02-01 → 2026-09-20.
+- The end date is chosen so every lead time (up to 240h) verifies against ERA5 available at build time (ERA5 runs ~5 days behind real time).
 - Head-to-head views use only the period both models cover. GFS-only views show the full record.
 - The last ~3 months of ERA5 are preliminary (ERA5T) and can be revised; flagged on the dashboard.
 - Dashboard date picker works at month resolution (see 4.4).
@@ -109,6 +109,7 @@ Definitions (fixed from Phase 8):
   - *Skill curves and metric cards:* spatial ACC computed per forecast over the region, then averaged over forecasts. This is the operational convention (and the basis of the 0.6 threshold).
   - *Spatial maps:* temporal ACC at each grid point (the v1 definition).
 - Precipitation thresholds: 1, 5, 10 mm/24h (config).
+- **Homogeneous sample:** a forecast run is included only if every configured lead time has both forecast and ERA5 data, so every point on a skill curve uses the same set of forecasts. In head-to-head views, only runs available for both models are used. Excluded runs are logged and counted.
 
 ### 3.8 Verification Caveats (shown on the dashboard)
 - **ERA5 is produced with the ECMWF model.** Verifying ECMWF against ERA5 favours ECMWF; the head-to-head view says so.
@@ -183,12 +184,12 @@ models:
   gfs:
     enabled: true
     sources:
-      - {name: aws,  start: "2021-03-22", end: "2026-09-30"}
+      - {name: aws,  start: "2021-03-23", end: "2026-09-20"}
       - {name: ncar, start: "2015-01-15", end: "2021-03-21", enabled: false}   # Phase 12
   ecmwf:
     enabled: false              # Phase 9
     sources:
-      - {name: aws,  start: "2024-02-01", end: "2026-09-30"}
+      - {name: aws,  start: "2024-02-01", end: "2026-09-20"}
 
 model_versions:                 # vertical markers on time-based views
   gfs:   [{name: "v15", date: "2019-06-12"}, {name: "v16", date: "2021-03-22"}]
@@ -378,9 +379,9 @@ Build steps:
 ---
 
 ### Phase 8 — Generalised Pipeline & Storage Redesign (v1.5)
-*Goal: one pipeline that loops over model × variable × domain from config, with the storage design in 4.4. Scope is deliberately narrow: GFS (AWS), T2m, `europe` domain, 2021-03-22 → 2026-09-30. Everything after this is mostly config.*
+*Goal: one pipeline that loops over model × variable × domain from config, with the storage design in 4.4. Scope is deliberately narrow: GFS (AWS), T2m, `europe` domain, 2021-03-23 → 2026-09-20. Everything after this is mostly config.*
 
-**Learning checkpoint before starting:** Why domain means are weighted by cos(latitude); pooled vs averaged RMSE; temporal (grid-point) ACC vs spatial (per-forecast) ACC and which one the 0.6 threshold refers to; what a 30-year climatological normal is and why a single month is not one; sufficient statistics (why storing Σe and Σe² is enough to recover RMSE for any window).
+**Learning checkpoint before starting:** Homogeneous verification samples and why mixing sample sizes across lead times biases skill curves; why domain means are weighted by cos(latitude); pooled vs averaged RMSE; temporal (grid-point) ACC vs spatial (per-forecast) ACC and which one the 0.6 threshold refers to; what a 30-year climatological normal is and why a single month is not one; sufficient statistics (why storing Σe and Σe² is enough to recover RMSE for any window).
 
 Build steps:
 48. Config v2 schema and loader (Section 4.2) with validation. Variable registry in code. Single source for lead times — remove the duplicate `LEAD_TIMES` in `components.py`; skill-curve ticks and intermediate gridlines derive from config.
@@ -407,7 +408,7 @@ Build steps:
 Build steps:
 61. Kickoff checks (report before building): ECMWF open data on AWS — file/index layout, byte-range feasibility, parameter names (`2t`, `msl`, `10u`, `10v`, `gh` @500, `tp`, `sd`); confirm IFS cycle dates for `model_versions`.
 62. `ecmwf_fetcher.py` extending `base_fetcher`, same interface as GFS. Enable `ecmwf` in config.
-63. Run ECMWF T2m Europe 2024-02-01 → 2026-09-30.
+63. Run ECMWF T2m Europe 2024-02-01 → 2026-09-20.
 64. Dashboard comparison mode: side-by-side (overlaid) skill curves for both models; spatial difference map (RMSE_GFS − RMSE_ECMWF, diverging scale, positive = ECMWF better); common-period enforcement; ERA5 caveat text (3.8).
 65. Audit, commit: "Phase 9 complete — ECMWF comparison".
 
