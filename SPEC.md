@@ -384,19 +384,19 @@ Build steps:
 **Learning checkpoint before starting:** Centred vs uncentred ACC and which one WMO verification standards use; homogeneous verification samples and why mixing sample sizes across lead times biases skill curves; why domain means are weighted by cos(latitude); pooled vs averaged RMSE; temporal (grid-point) ACC vs spatial (per-forecast) ACC and which one the 0.6 threshold refers to; what a 30-year climatological normal is and why a single month is not one; sufficient statistics (why storing Σe and Σe² is enough to recover RMSE for any window).
 
 Build steps:
-48. Config v2 schema and loader (Section 4.2) with validation. Variable registry in code. Single source for lead times — remove the duplicate `LEAD_TIMES` in `components.py`; skill-curve ticks and intermediate gridlines derive from config.
-49. Generalise `base_fetcher` and `gfs_fetcher`: fetch by (variable, domain, month, runs), subset to domain in memory, 00z/12z only. Raw layout per 4.4.
-50. ERA5 fetcher generalised the same way (variable, domain, month, hours 00/12 + valid times needed). Add climatology fetch: ERA5 monthly averaged by hour of day, 1991–2020, per variable and domain.
-51. Climatology module rebuilt on the 1991–2020 normal, by month and hour of day.
-52. Aggregation module: align → anomalies → monthly sufficient statistics (4.4 item 2). Validate before writing. Delete raw for that month when `keep_raw: false`.
-53. Region-table and map-table builders (4.4 items 3–4), cos(lat)-weighted. Metric functions compute from sufficient statistics; existing unit tests updated and new tests added for weighting, pooling and spatial ACC against hand-computed values.
-54. Pipeline runner: `python -m src.pipeline --model gfs --variable t2m --domain europe --start … --end …`. Resumable (skips completed months), logs progress, safe to leave running.
-55. Dashboard reads only `data/dashboard/`. Sidebar selectors built from config: model, variable, domain → region, date range (month resolution). Model-version markers drawn on any time-based chart (none yet beyond the first). Selecting a region zooms the spatial map to that region's bounds (with a small margin); a toggle returns to the full-domain view with the region box.
-56. `requirements-dev.txt` with pytest. Integration tests skip cleanly when CDS credentials or raw data are absent (resolves 008).
-57. Retire v1 data files and the on-the-fly recompute path (resolves 006, 007). Keep a copy of the v1 metric maps outside the repo until the step 59 regression check passes.
-58. Run the full GFS T2m Europe period. Report runtime, raw disk peak, committed size vs budget.
+48. Config v2 schema and loader (Section 4.2) with validation. Variable registry in code. Single source for lead times — remove the duplicate `LEAD_TIMES` in `components.py`; skill-curve ticks and intermediate gridlines derive from config. ✓
+49. Generalise `base_fetcher` and `gfs_fetcher`: fetch by (variable, domain, month, runs), subset to domain in memory, 00z/12z only. Raw layout per 4.4. ✓
+50. ERA5 fetcher generalised the same way (variable, domain, month, hours 00/12 + valid times needed). Add climatology fetch: ERA5 monthly averaged by hour of day, 1991–2020, per variable and domain. ✓
+51. Climatology module rebuilt on the 1991–2020 normal, by month and hour of day. ✓
+52. Aggregation module: align → anomalies → monthly sufficient statistics (4.4 item 2). Validate before writing. Delete raw for that month when `keep_raw: false`. ✓
+53. Region-table and map-table builders (4.4 items 3–4), cos(lat)-weighted. Metric functions compute from sufficient statistics; existing unit tests updated and new tests added for weighting, pooling and spatial ACC against hand-computed values. ✓
+54. Pipeline runner: `python -m src.pipeline --model gfs --variable t2m --domain europe --start … --end …`. Resumable (skips completed months), logs progress, safe to leave running. ✓
+55. Dashboard reads only `data/dashboard/`. Sidebar selectors built from config: model, variable, domain → region, date range (month resolution). Model-version markers drawn on any time-based chart (none yet beyond the first). Selecting a region zooms the spatial map to that region's bounds (with a small margin); a toggle returns to the full-domain view with the region box. ✓
+56. `requirements-dev.txt` with pytest. Integration tests skip cleanly when CDS credentials or raw data are absent (resolves 008). ✓
+57. Retire v1 data files and the on-the-fly recompute path (resolves 006, 007). Keep a copy of the v1 metric maps outside the repo until the step 59 regression check passes. ✓
+58. Run the full GFS T2m Europe period. Report runtime, raw disk peak, committed size vs budget. ✓
 59. Sanity checks: (a) regression — recompute 1–7 Jan 2023 grid-point bias and RMSE from the new aggregates and match the v1 maps (ACC and domain means will differ by design: new climatology, cos-lat weighting); (b) spot-check one grid point and one region by hand for one month; (c) confirm skill decreases with lead time and magnitudes are plausible against published GFS T2m skill.
-60. Spec vs build audit; dead code removal. Commit: "Phase 8 complete — generalised pipeline".
+60. Spec vs build audit; dead code removal. Commit: "Phase 8 complete — generalised pipeline". ✓
 
 ---
 
@@ -466,9 +466,10 @@ Build steps:
 | 003 | Phase 3 | GFS byte-range extraction used instead of full GRIB2 download (~350 KB per file vs ~400 MB). More efficient but dependent on `.idx` index files being present on AWS S3. | Noted for reference |
 | 004 | Phase 7 | Whitespace gap before first data point on log x-axis of skill curves | Resolved — explicit axis range derived from config lead times (Oct 2026) |
 | 005 | Phase 7 | ecmwflibs Windows-only; breaks/unnecessary on macOS | Resolved — platform marker in requirements.txt (Oct 2026) |
-| 006 | Phase 7 | data/processed/ is committed to git (~35 MB) for Streamlit Cloud deployment, diverging from Phase 1 step 7 | Open — to be redesigned in Phase 8 |
-| 007 | Refinement | Date range selector recomputes from aligned_test_jan2023.nc (32 MB), so sub-period recomputation only covers January 2023 test data | Open — to be redesigned in Phase 8 |
-| 008 | Session 1 | Integration tests in test_era5_fetcher.py and test_alignment.py fail rather than skip when CDS credentials or raw data are absent | Open |
+| 006 | Phase 7 | data/processed/ is committed to git (~35 MB) for Streamlit Cloud deployment, diverging from Phase 1 step 7 | Resolved — Phase 8: data/processed/ gitignored, dashboard reads committed data/dashboard/ (Oct 2026) |
+| 007 | Refinement | Date range selector recomputes from aligned_test_jan2023.nc (32 MB), so sub-period recomputation only covers January 2023 test data | Resolved — Phase 8: month-resolution window over monthly region tables; on-the-fly recompute removed (Oct 2026) |
+| 008 | Session 1 | Integration tests in test_era5_fetcher.py and test_alignment.py fail rather than skip when CDS credentials or raw data are absent | Resolved — Phase 8: tests/test_integration.py skips cleanly; v1 tests replaced (Oct 2026) |
+| 009 | Phase 8 | Data-source note: in the NOAA AWS GFS archive the `.idx` byte offsets for three T2m fields do not point at a GRIB message (the range does not start with `GRIB`; a control file from the same day decodes fine): 2022-11-29 12z +120h and +240h, and 2022-11-30 00z +240h. Retries cannot fix it. The two affected runs (2022-11-29 12z, 2022-11-30 00z) are excluded under the homogeneous-sample rule (3.7) and counted in the coverage table; 4,014 of 4,016 runs are verified. | Noted for reference — no action |
 
 ---
 

@@ -4,9 +4,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date
 
-import numpy as np
 import pytest
-import xarray as xr
 
 from src import pipeline
 from src.processing.aggregate import is_month_done
