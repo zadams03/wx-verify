@@ -257,6 +257,18 @@ def models_for(cfg: Config, variable: str, year: int, month: int, only: str | No
     ]
 
 
+def _prefetch_months(cfg: Config, inits: list[date], only_model: str | None) -> list[tuple[int, int]]:
+    """ERA5 months to fetch now: those the month needs plus the rest of its last year, up to
+    the last ERA5 month any enabled model's period needs. One CDS request then serves a
+    whole year instead of one per month (queue time dominates small requests)."""
+    needed = era5_months(inits, cfg.lead_times_hours)
+    ends = [cfg.models[m].end for m in cfg.enabled_models() if only_model in (None, m)]
+    last = era5_months([max(ends)], cfg.lead_times_hours)[-1]
+    first_year = needed[-1][0]
+    span = [(first_year, mo) for mo in range(1, 13) if (first_year, mo) <= last and (first_year, mo) >= needed[0]]
+    return sorted(set(needed) | set(span))
+
+
 def process_domain_month(
     cfg: Config,
     domain: str,
@@ -295,7 +307,7 @@ def process_domain_month(
         inits = sorted({d for v in todo for m in todo[v][0] for d in FETCHERS[m](cfg).init_dates(year, month)})
         hours = required_hours(cfg.runs, cfg.lead_times_hours)
         try:
-            ERA5Fetcher(cfg).ensure_months(batch, domain, era5_months(inits, cfg.lead_times_hours), hours)
+            ERA5Fetcher(cfg).ensure_months(batch, domain, _prefetch_months(cfg, inits, only_model), hours)
         except Exception:
             logger.exception("ERA5 batch FAILED %s %s %s", domain, label, batch)
         for v, (models, pending, comparison) in todo.items():

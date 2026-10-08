@@ -117,29 +117,34 @@ class ERA5Fetcher(BaseFetcher):
                       hours: list[int]) -> None:
         """Make sure every (variable, month) file exists, with as few CDS requests as possible.
 
-        Missing variables of one month that share a dataset and level go in one request;
-        up to MAX_CDS_REQUESTS requests run at once.
+        CDS queue time dominates a small request, so the missing months of one year that share
+        a dataset and level are fetched in one request (all the variables that need them
+        together) and split into the per-variable, per-month files. Up to MAX_CDS_REQUESTS
+        requests run at once.
         """
         cfg = self.config
+        # (year, level) -> {variable: field}, and the months any of them is missing
         groups: dict[tuple, dict[str, ERA5Field]] = {}
+        wanted: dict[tuple, set[int]] = {}
         for y, m in months:
             for v in variables:
                 field = get_variable(v).source_field("era5")
                 if not self._is_current(self.raw_path(v, domain, y, m), field, hours):
-                    groups.setdefault((y, m, field.level), {})[v] = field
+                    groups.setdefault((y, field.level), {})[v] = field
+                    wanted.setdefault((y, field.level), set()).add(m)
         if not groups:
             return
 
         def run(key: tuple) -> None:
-            y, m, level = key
-            members = groups[key]
+            y, level = key
+            members, mons = groups[key], sorted(wanted[key])
             names = list(dict.fromkeys(n for f in members.values() for n in f.cds_names))
             request = {
                 "product_type": "reanalysis",
                 "variable": names,
                 "year": str(y),
-                "month": f"{m:02d}",
-                "day": [f"{d:02d}" for d in range(1, calendar.monthrange(y, m)[1] + 1)],
+                "month": [f"{m:02d}" for m in mons],
+                "day": [f"{d:02d}" for d in range(1, 32)],
                 "time": [f"{h:02d}:00" for h in hours],
                 "area": _area(cfg.domains[domain].bounds),
                 "data_format": "netcdf",
@@ -147,24 +152,29 @@ class ERA5Fetcher(BaseFetcher):
             }
             if level:
                 request["pressure_level"] = level
-            tmp = paths.raw_dir("era5", domain) / f".batch_{y:04d}-{m:02d}_{level or 'sfc'}.nc"
-            logger.info("Fetching ERA5 %s %s %04d-%02d hours=%s", names, domain, y, m, hours)
+            tmp = paths.raw_dir("era5", domain) / f".batch_{y:04d}_{level or 'sfc'}.nc"
+            logger.info("Fetching ERA5 %s %s %04d months %s hours=%s", names, domain, y, mons, hours)
             self._retrieve(_HOURLY_DATASETS[level is not None], request, tmp)
             try:
                 with xr.open_dataset(tmp) as ds:
                     ds = ds.load()
                 if "pressure_level" in ds.dims:
                     ds = ds.squeeze("pressure_level", drop=True)
+                month_of = pd.DatetimeIndex(ds.valid_time.values).month
                 for v, f in members.items():
-                    out = self.raw_path(v, domain, y, m)
-                    part = out.with_suffix(".nc.part")
-                    ds[list(f.short_names)].to_netcdf(part)
-                    os.replace(part, out)
+                    for m in mons:
+                        sel = np.flatnonzero(month_of == m)
+                        if not sel.size:
+                            continue                      # month not available (yet): left missing
+                        out = self.raw_path(v, domain, y, m)
+                        part = out.with_suffix(".nc.part")
+                        ds[list(f.short_names)].isel(valid_time=sel).to_netcdf(part, engine="netcdf4")
+                        os.replace(part, out)
             finally:
                 tmp.unlink(missing_ok=True)
 
         with ThreadPoolExecutor(max_workers=MAX_CDS_REQUESTS) as pool:
-            for fut in [pool.submit(run, k) for k in sorted(groups, key=lambda k: (k[0], k[1], k[2] or ""))]:
+            for fut in [pool.submit(run, k) for k in sorted(groups, key=lambda k: (k[0], k[1] or ""))]:
                 fut.result()
 
     def fetch_month(self, variable: str, domain: str, year: int, month: int,
