@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import calendar
 from abc import ABC, abstractmethod
+from datetime import date
 from pathlib import Path
 
 import xarray as xr
@@ -8,31 +10,37 @@ import xarray as xr
 from src.utils.config import Config
 
 
-class BaseFetcher(ABC):
-    """Interface all model data fetchers must implement.
+def month_dates(year: int, month: int, start: date, end: date) -> list[date]:
+    """Dates of (year, month) that fall inside [start, end]."""
+    n_days = calendar.monthrange(year, month)[1]
+    return [
+        d for d in (date(year, month, day) for day in range(1, n_days + 1))
+        if start <= d <= end
+    ]
 
-    To add a new model source: subclass BaseFetcher and implement the three
-    abstract methods. The config object is available via self.config.
+
+class BaseFetcher(ABC):
+    """Interface every data fetcher implements: fetch by (variable, domain, month).
+
+    To add a source: subclass BaseFetcher and implement the three abstract
+    methods. Raw files live under data/raw/{source}/{domain}/ (SPEC 4.4).
     """
 
     def __init__(self, config: Config) -> None:
         self.config = config
 
     @abstractmethod
-    def fetch(self, *args, **kwargs) -> Path:
-        """Download raw data to the local cache. Return the local file path.
+    def fetch_month(self, variable: str, domain: str, year: int, month: int) -> Path:
+        """Download one month to the local cache and return its path.
 
-        Implementations are responsible for caching: if the file already
-        exists locally, return its path without re-downloading.
+        Implementations subset to the domain before writing and skip the
+        download when a complete cached file already exists.
         """
-        ...
 
     @abstractmethod
-    def validate(self, *args, **kwargs) -> None:
-        """Raise ValueError if cached data fails quality checks."""
-        ...
+    def validate(self, path: Path, variable: str, domain: str) -> None:
+        """Raise ValueError if the cached file fails quality checks."""
 
     @abstractmethod
-    def load(self, *args, **kwargs) -> xr.DataArray:
-        """Load cached data, apply domain subset, return a clean DataArray."""
-        ...
+    def load(self, path: Path, variable: str) -> xr.DataArray:
+        """Open a cached file and return a DataArray in display units."""

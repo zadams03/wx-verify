@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import calendar
 import logging
-from datetime import date, datetime
+import os
+import time
 from pathlib import Path
 
 import cdsapi
@@ -10,135 +11,154 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from src.utils.config import Config
+from src.data.base_fetcher import BaseFetcher
+from src.data.registry import get_variable
+from src.utils import paths
 
 logger = logging.getLogger(__name__)
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_ERA5_RAW_DIR = _REPO_ROOT / "data" / "raw" / "era5"
-
-_ALL_HOURS = [f"{h:02d}:00" for h in range(24)]
-
-
-def _output_path(year: int, month: int) -> Path:
-    _ERA5_RAW_DIR.mkdir(parents=True, exist_ok=True)
-    return _ERA5_RAW_DIR / f"era5_t2m_{year:04d}-{month:02d}.nc"
+_HOURLY_DATASET = "reanalysis-era5-single-levels"
+_CLIM_DATASET = "reanalysis-era5-single-levels-monthly-means"
+_CLIM_PRODUCT = "monthly_averaged_reanalysis_by_hour_of_day"
+_MAX_ATTEMPTS = 3
+_BACKOFF_S = 30.0
 
 
-def fetch_era5(config: Config, year: int, month: int) -> Path:
-    """Download one month of ERA5 T2m to data/raw/era5/. Returns local path.
+def required_hours(runs: list[str], lead_times_hours: list[int]) -> list[int]:
+    """UTC hours at which forecasts are valid: (run hour + lead) mod 24."""
+    return sorted({(int(r) + h) % 24 for r in runs for h in lead_times_hours})
 
-    Skips the download if the file already exists (caching).
-    """
-    out = _output_path(year, month)
-    if out.exists():
-        logger.info("Cache hit — skipping download: %s", out.name)
-        return out
 
-    logger.info("Fetching ERA5 T2m %04d-%02d ...", year, month)
-    n_days = calendar.monthrange(year, month)[1]
-    days = [f"{d:02d}" for d in range(1, n_days + 1)]
-
-    domain = config.domain
+def _area(bounds) -> list[float]:
     # CDS area order: [N, W, S, E]
-    area = [domain.lat_max, domain.lon_min, domain.lat_min, domain.lon_max]
+    return [bounds.lat_max, bounds.lon_min, bounds.lat_min, bounds.lon_max]
 
-    c = cdsapi.Client()
-    c.retrieve(
-        "reanalysis-era5-single-levels",
-        {
+
+class ERA5Fetcher(BaseFetcher):
+    """ERA5 single-levels from the Copernicus CDS.
+
+    Hourly: one request per (variable, domain, month), only the hours forecasts
+    are valid at. Files: data/raw/era5/{domain}/{variable}_{YYYY-MM}.nc.
+    """
+
+    def raw_path(self, variable: str, domain: str, year: int, month: int) -> Path:
+        return paths.raw_dir("era5", domain) / f"{variable}_{year:04d}-{month:02d}.nc"
+
+    def climatology_raw_path(self, variable: str, domain: str) -> Path:
+        y0, y1 = self.config.climatology.period
+        return paths.raw_dir("era5", domain) / f"{variable}_clim_{y0}-{y1}.nc"
+
+    def _retrieve(self, dataset: str, request: dict, out: Path) -> None:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        part = out.with_suffix(".nc.part")
+        client = cdsapi.Client(progress=False)
+        last: Exception | None = None
+        for attempt in range(_MAX_ATTEMPTS):
+            try:
+                client.retrieve(dataset, request, str(part))
+                os.replace(part, out)
+                return
+            except Exception as exc:
+                last = exc
+                logger.warning("CDS request failed (attempt %d/%d): %s", attempt + 1, _MAX_ATTEMPTS, exc)
+                if attempt < _MAX_ATTEMPTS - 1:
+                    time.sleep(_BACKOFF_S * 2 ** attempt)
+        raise RuntimeError(f"CDS request for {out.name} failed: {last}")
+
+    def _hours_cover(self, path: Path, hours: list[int]) -> bool:
+        with xr.open_dataset(path) as ds:
+            have = {pd.Timestamp(t).hour for t in ds.valid_time.values}
+        return set(hours) <= have
+
+    def fetch_month(self, variable: str, domain: str, year: int, month: int,
+                    hours: list[int] | None = None) -> Path:
+        """Download one month (all days) at ``hours``. A cached file is reused only
+        if it already contains every requested hour."""
+        cfg = self.config
+        if hours is None:
+            hours = required_hours(cfg.runs, cfg.lead_times_hours)
+        out = self.raw_path(variable, domain, year, month)
+        if out.exists() and self._hours_cover(out, hours):
+            logger.info("Cache hit: %s", out)
+            return out
+
+        field = get_variable(variable).source_field("era5")
+        n_days = calendar.monthrange(year, month)[1]
+        logger.info("Fetching ERA5 %s %s %04d-%02d hours=%s", variable, domain, year, month, hours)
+        self._retrieve(_HOURLY_DATASET, {
             "product_type": "reanalysis",
-            "variable": config.era5.cds_variable,
+            "variable": field.cds_name,
             "year": str(year),
             "month": f"{month:02d}",
-            "day": days,
-            "time": _ALL_HOURS,
-            "area": area,
-            "format": "netcdf",
-        },
-        str(out),
-    )
-    logger.info("Saved: %s", out)
-    return out
+            "day": [f"{d:02d}" for d in range(1, n_days + 1)],
+            "time": [f"{h:02d}:00" for h in hours],
+            "area": _area(cfg.domains[domain].bounds),
+            "data_format": "netcdf",
+            "download_format": "unarchived",
+        }, out)
+        return out
 
+    def fetch_climatology(self, variable: str, domain: str) -> Path:
+        """Download ERA5 monthly means by hour of day for the configured normal."""
+        cfg = self.config
+        out = self.climatology_raw_path(variable, domain)
+        if out.exists():
+            logger.info("Cache hit: %s", out)
+            return out
+        field = get_variable(variable).source_field("era5")
+        y0, y1 = cfg.climatology.period
+        logger.info("Fetching ERA5 climatology %s %s %d-%d", variable, domain, y0, y1)
+        self._retrieve(_CLIM_DATASET, {
+            "product_type": _CLIM_PRODUCT,
+            "variable": field.cds_name,
+            "year": [str(y) for y in range(y0, y1 + 1)],
+            "month": [f"{m:02d}" for m in range(1, 13)],
+            "time": [f"{h:02d}:00" for h in required_hours(cfg.runs, cfg.lead_times_hours)],
+            "area": _area(cfg.domains[domain].bounds),
+            "data_format": "netcdf",
+            "download_format": "unarchived",
+        }, out)
+        return out
 
-def validate_era5_file(path: Path, year: int, month: int) -> None:
-    """Raise ValueError if the file fails dimension, coverage, or NaN checks."""
-    ds = xr.open_dataset(path)
-    try:
-        required_dims = {"valid_time", "latitude", "longitude"}
-        missing_dims = required_dims - set(ds.sizes)
-        if missing_dims:
-            raise ValueError(f"Missing dimensions in {path.name}: {missing_dims}")
+    def validate(self, path: Path, variable: str, domain: str,
+                 year: int | None = None, month: int | None = None) -> None:
+        """Raise ValueError if the file fails dimension, coverage, range or NaN checks.
 
-        if "t2m" not in ds:
-            raise ValueError(
-                f"Variable 't2m' not found in {path.name}. Got: {list(ds.data_vars)}"
-            )
+        With year/month, also checks that every day of that month is present.
+        """
+        spec = get_variable(variable)
+        field = spec.source_field("era5")
+        with xr.open_dataset(path) as ds:
+            missing = {"valid_time", "latitude", "longitude"} - set(ds.sizes)
+            if missing:
+                raise ValueError(f"Missing dimensions in {path.name}: {missing}")
+            if field.short_name not in ds:
+                raise ValueError(f"'{field.short_name}' not in {path.name}: {list(ds.data_vars)}")
+            b = self.config.domains[domain].bounds
+            if (float(ds.latitude.min()) < b.lat_min or float(ds.latitude.max()) > b.lat_max
+                    or float(ds.longitude.min()) < b.lon_min or float(ds.longitude.max()) > b.lon_max):
+                raise ValueError(f"{path.name}: grid extends outside domain '{domain}'")
+            da = ds[field.short_name]
+            if year is not None and month is not None:
+                n_days = calendar.monthrange(year, month)[1]
+                days = {pd.Timestamp(t).day for t in ds.valid_time.values}
+                gaps = set(range(1, n_days + 1)) - days
+                if gaps:
+                    raise ValueError(f"{path.name}: missing days {sorted(gaps)[:5]}")
+            if bool(da.isnull().all(dim=("latitude", "longitude")).any()):
+                raise ValueError(f"{path.name}: all-NaN time slice")
+            conv = field.conversion.apply(da.values)
+            lo, hi = spec.valid_range
+            if np.nanmin(conv) < lo or np.nanmax(conv) > hi:
+                raise ValueError(f"{path.name}: values outside plausible range [{lo}, {hi}]")
 
-        # All days of the month must be present
-        n_days = calendar.monthrange(year, month)[1]
-        expected_days = {date(year, month, d) for d in range(1, n_days + 1)}
-        actual_days = {pd.Timestamp(t).date() for t in ds.valid_time.values}
-        missing_days = expected_days - actual_days
-        if missing_days:
-            raise ValueError(
-                f"Missing {len(missing_days)} day(s) in {path.name}: "
-                f"{sorted(missing_days)[:5]}"
-            )
-
-        # No time slice should be entirely NaN
-        da = ds["t2m"]
-        for i in range(len(ds.valid_time)):
-            if np.all(np.isnan(da.isel(valid_time=i).values)):
-                raise ValueError(
-                    f"All-NaN slice at time index {i} "
-                    f"({ds.valid_time.values[i]}) in {path.name}"
-                )
-
-    finally:
-        ds.close()
-
-
-def load_era5(config: Config, year: int, month: int) -> xr.DataArray:
-    """Open a cached ERA5 file, subset to config domain, return t2m DataArray.
-
-    Units are Kelvin as delivered by ERA5.
-    """
-    path = _output_path(year, month)
-    if not path.exists():
-        raise FileNotFoundError(
-            f"ERA5 file not found: {path}. Run fetch_era5() first."
-        )
-
-    ds = xr.open_dataset(path)
-    da = ds["t2m"]
-
-    domain = config.domain
-    # ERA5 latitude is ordered N→S, so slice high→low
-    da = da.sel(
-        latitude=slice(domain.lat_max, domain.lat_min),
-        longitude=slice(domain.lon_min, domain.lon_max),
-    )
-    # Rename valid_time → time for a consistent dimension name downstream
-    da = da.rename({"valid_time": "time"})
-
-    da.attrs["source"] = "ERA5 reanalysis"
-    da.attrs["cds_variable"] = config.era5.cds_variable
-    return da
-
-
-def fetch_era5_range(config: Config) -> list[Path]:
-    """Fetch all months in the configured date_range. Cached months are skipped."""
-    start = datetime.strptime(config.date_range.start, "%Y-%m-%d")
-    end = datetime.strptime(config.date_range.end, "%Y-%m-%d")
-
-    paths: list[Path] = []
-    year, month = start.year, start.month
-    while (year, month) <= (end.year, end.month):
-        paths.append(fetch_era5(config, year, month))
-        month += 1
-        if month > 12:
-            month = 1
-            year += 1
-    return paths
+    def load(self, path: Path, variable: str) -> xr.DataArray:
+        """Return ERA5 as DataArray(time, latitude, longitude) in display units."""
+        field = get_variable(variable).source_field("era5")
+        with xr.open_dataset(path) as ds:
+            da = ds[field.short_name].load()
+        da = da.rename({"valid_time": "time"})
+        da = da.drop_vars([c for c in da.coords if c not in ("time", "latitude", "longitude")])
+        da = field.conversion.apply(da.astype("float64")).astype("float32")
+        da.attrs.update(source="ERA5 reanalysis", variable=variable)
+        return da
