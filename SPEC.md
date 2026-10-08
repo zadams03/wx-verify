@@ -81,7 +81,7 @@ A **domain** is a fetch/processing area. A **region** is a dashboard preset insi
 | `japan` *(later)* | TBD | TBD | Config-only addition after Phase 10 |
 | `south_america` *(later)* | TBD | TBD | Config-only addition after Phase 10 |
 
-Region boxes are first-pass and to be sanity-checked by Zac before Phase 10.
+Region boxes reviewed and confirmed by Zac (Oct 2026). Known overlaps (Western Canada / Rockies; Norwegian Mountains includes parts of Sweden and Finland) accepted for now.
 
 ### 3.5 Lead Times
 - 24h, 48h, 72h, 120h, 240h. Precipitation uses the 24h accumulation window *ending* at each lead time.
