@@ -180,6 +180,33 @@ def test_climatology_period_invalid(raw):
 
 
 # ---------------------------------------------------------------------------
+# Mountain-region flags
+# ---------------------------------------------------------------------------
+
+def test_repo_config_flags_mountain_regions():
+    cfg = load_config()
+    assert cfg.domains["europe"].mountain_regions == {"European Alps", "Norwegian Mountains"}
+    assert cfg.domains["north_america_west"].mountain_regions == {
+        "Pacific Northwest", "Western Canada", "Rockies"}
+    assert cfg.is_mountain_region("europe", "European Alps")
+    assert not cfg.is_mountain_region("europe", "UK & Ireland")
+
+
+def test_region_mountain_flag_must_be_boolean(raw):
+    def m(d):
+        d["domains"]["europe"]["regions"]["European Alps"]["mountain"] = "yes"
+    with pytest.raises(ConfigError, match="mountain must be true or false"):
+        parse_config(_broken(raw, m))
+
+
+def test_unknown_region_key_is_rejected(raw):
+    def m(d):
+        d["domains"]["europe"]["regions"]["European Alps"]["montain"] = True    # typo
+    with pytest.raises(ConfigError, match="unknown keys.*montain"):
+        parse_config(_broken(raw, m))
+
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 

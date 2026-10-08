@@ -37,15 +37,15 @@ domains:
       "Mediterranean":     {lat_min: 36,   lat_max: 46, lon_min: -5,  lon_max: 28}
       "Central Europe":    {lat_min: 46,   lat_max: 55, lon_min: 8,   lon_max: 20}
       "Iberian Peninsula": {lat_min: 36,   lat_max: 44, lon_min: -9,  lon_max: 3}
-      "European Alps":     {lat_min: 43.5, lat_max: 48.5, lon_min: 5, lon_max: 16.5}
-      "Norwegian Mountains": {lat_min: 58, lat_max: 71, lon_min: 5,   lon_max: 31}
+      "European Alps":     {lat_min: 43.5, lat_max: 48.5, lon_min: 5, lon_max: 16.5, mountain: true}
+      "Norwegian Mountains": {lat_min: 58, lat_max: 71, lon_min: 5,   lon_max: 31, mountain: true}
   north_america_west:
     bounds: {lat_min: 36, lat_max: 62, lon_min: -140, lon_max: -102}
     enabled: false              # Phase 10
     regions:
-      "Pacific Northwest": {lat_min: 42, lat_max: 49, lon_min: -125, lon_max: -116}
-      "Western Canada":    {lat_min: 49, lat_max: 60, lon_min: -135, lon_max: -110}
-      "Rockies":           {lat_min: 37, lat_max: 55, lon_min: -120, lon_max: -104}
+      "Pacific Northwest": {lat_min: 42, lat_max: 49, lon_min: -125, lon_max: -116, mountain: true}
+      "Western Canada":    {lat_min: 49, lat_max: 60, lon_min: -135, lon_max: -110, mountain: true}
+      "Rockies":           {lat_min: 37, lat_max: 55, lon_min: -120, lon_max: -104, mountain: true}
 
 climatology: {source: era5_monthly_by_hour, period: [1991, 2020]}
 dashboard:   {map_resolution: 0.25, committed_size_budget_mb: 150}

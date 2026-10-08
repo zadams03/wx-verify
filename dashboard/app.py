@@ -24,6 +24,8 @@ from src.processing.metrics import combine_stats, map_metrics, region_metrics
 from src.utils import paths
 from src.utils.config import load_config
 from src.viz.components import (
+    CENTRED_ACC_NOTE,
+    TERRAIN_NOTE,
     inject_card_styles,
     render_lead_time_selector,
     render_map_toggle,
@@ -155,6 +157,9 @@ st.caption(
     f"({ex_fc:,} missing forecast data, {ex_era5:,} missing ERA5 at a valid time)."
 )
 
+if cfg.is_mountain_region(domain, region_name):
+    st.info(TERRAIN_NOTE, icon="⛰️")
+
 versions = cfg.model_versions.get(model, [])
 if versions:
     win_start = date.fromisoformat(first_month + "-01")
@@ -184,6 +189,7 @@ with col_left:
         build_skill_curves(summary, region_name, lead_times=cfg.lead_times_hours, units=units),
         width="stretch",
     )
+    st.caption(CENTRED_ACC_NOTE)
 
 with col_right:
     years = sorted({int(m[:4]) for m in window})

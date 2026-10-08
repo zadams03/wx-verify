@@ -186,12 +186,15 @@ def _setup_logging() -> None:
 def _rebuild_tables(cfg: Config) -> None:
     # Imported here so a long-running pipeline rebuilds with the table code on disk
     # when it finishes, not the version it was started with.
-    from src.processing.tables import build_coverage_table, build_map_tables, build_region_table
+    from src.processing.tables import (
+        build_coverage_table, build_map_tables, build_region_table, check_size_budget,
+    )
     try:
         build_region_table()
         build_coverage_table()
         build_map_tables(cfg.dashboard.map_resolution)
         logger.info("Dashboard tables rebuilt in %s", paths.dashboard_dir())
+        check_size_budget(cfg.dashboard.committed_size_budget_mb)
     except FileNotFoundError:
         logger.info("No aggregates yet — dashboard tables not built")
     except Exception:

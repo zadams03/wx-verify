@@ -28,6 +28,9 @@ REQUIRED_KEYS = (
 )
 
 
+_REGION_KEYS = ("lat_min", "lat_max", "lon_min", "lon_max", "mountain")
+
+
 class ConfigError(ValueError):
     """Raised for any invalid or missing config.yaml content."""
 
@@ -97,6 +100,7 @@ class DomainConfig:
     bounds: Bounds
     enabled: bool
     regions: dict[str, Bounds]
+    mountain_regions: frozenset[str] = frozenset()   # regions flagged `mountain: true`
 
 
 @dataclass(frozen=True)
@@ -134,6 +138,9 @@ class Config:
 
     def regions(self, domain: str) -> dict[str, Bounds]:
         return self.domains[domain].regions
+
+    def is_mountain_region(self, domain: str, region: str) -> bool:
+        return region in self.domains[domain].mountain_regions
 
 
 # ---------------------------------------------------------------------------
@@ -319,15 +326,23 @@ def _parse_domains(value: Any) -> dict[str, DomainConfig]:
         _require_keys(d, ("bounds", "enabled", "regions"), where)
         bounds = _parse_bounds(d["bounds"], f"{where}.bounds")
         regions = {}
+        mountain = set()
         for rname, rb in _require_mapping(d["regions"], f"{where}.regions").items():
-            region = _parse_bounds(rb, f"{where}.regions.{rname}")
+            rwhere = f"{where}.regions.{rname}"
+            extra = set(_require_mapping(rb, rwhere)) - set(_REGION_KEYS)
+            if extra:
+                raise ConfigError(f"{rwhere} has unknown keys {sorted(extra)}; allowed: {list(_REGION_KEYS)}")
+            if _parse_bool(rb.get("mountain", False), f"{rwhere}.mountain"):
+                mountain.add(str(rname))
+            region = _parse_bounds(rb, rwhere)
             if not bounds.contains(region):
                 raise ConfigError(f"{where}.regions.'{rname}' lies outside the domain bounds")
             regions[str(rname)] = region
         enabled = _parse_bool(d["enabled"], f"{where}.enabled")
         if enabled and not regions:
             raise ConfigError(f"{where} is enabled but defines no regions")
-        domains[name] = DomainConfig(name=name, bounds=bounds, enabled=enabled, regions=regions)
+        domains[name] = DomainConfig(name=name, bounds=bounds, enabled=enabled, regions=regions,
+                                     mountain_regions=frozenset(mountain))
     return domains
 
 

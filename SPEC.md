@@ -400,12 +400,12 @@ Build steps:
 53. Region-table and map-table builders (4.4 items 3–4), cos(lat)-weighted. Metric functions compute from sufficient statistics; existing unit tests updated and new tests added for weighting, pooling and spatial ACC against hand-computed values. ✓
 54. Pipeline runner: `python -m src.pipeline --model gfs --variable t2m --domain europe --start … --end …`. Resumable (skips completed months), logs progress, safe to leave running. ✓
 55. Dashboard reads only `data/dashboard/`. Sidebar selectors built from config: model, variable, domain → region, date range (month resolution). Model-version markers drawn on any time-based chart (none yet beyond the first). Selecting a region zooms the spatial map to that region's bounds (with a small margin); a toggle returns to the full-domain view with the region box. ✓
-55b. Dashboard notes for mountain regions (brought forward from Phase 10): a one-line terrain-mismatch caveat (3.8) whenever a mountain region is selected; and a note that centred ACC in small regions is lower than in large ones (the region-mean anomaly is removed), so the 0.6 line is reached at shorter leads.
-55c. Size-budget check: the table build warns (log + dashboard build summary) when committed data/dashboard/ exceeds `committed_size_budget_mb`.
+55b. Dashboard notes for mountain regions (brought forward from Phase 10): a one-line terrain-mismatch caveat (3.8) whenever a mountain region is selected; and a note that centred ACC in small regions is lower than in large ones (the region-mean anomaly is removed), so the 0.6 line is reached at shorter leads. ✓
+55c. Size-budget check: the table build warns (log + dashboard build summary) when committed data/dashboard/ exceeds `committed_size_budget_mb`. ✓
 56. `requirements-dev.txt` with pytest. Integration tests skip cleanly when CDS credentials or raw data are absent (resolves 008). ✓
 57. Retire v1 data files and the on-the-fly recompute path (resolves 006, 007). Keep a copy of the v1 metric maps outside the repo until the step 59 regression check passes. ✓
 58. Run the full GFS T2m Europe period. Report runtime, raw disk peak, committed size vs budget. ✓
-59. Sanity checks: (a) regression — recompute 1–7 Jan 2023 grid-point bias and RMSE from the new aggregates and match the v1 maps (ACC and domain means will differ by design: new climatology, cos-lat weighting); (b) spot-check one grid point and one region by hand for one month; (c) confirm skill decreases with lead time and magnitudes are plausible against published GFS T2m skill.
+59. Sanity checks: (a) regression — recompute 1–7 Jan 2023 grid-point bias and RMSE from the new aggregates and match the v1 maps (ACC and domain means will differ by design: new climatology, cos-lat weighting); (b) spot-check one grid point and one region by hand for one month; (c) confirm skill decreases with lead time and magnitudes are plausible against published GFS T2m skill. ✓
 60. Spec vs build audit; dead code removal. Commit: "Phase 8 complete — generalised pipeline". ✓
 
 **Phase 8 build notes (Oct 2026 audit):**

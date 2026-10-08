@@ -7,6 +7,8 @@ from src.utils.config import Bounds
 
 __all__ = [
     "CARD_STYLES",
+    "TERRAIN_NOTE",
+    "CENTRED_ACC_NOTE",
     "inject_card_styles",
     "render_metric_cards",
     "render_lead_time_selector",
@@ -15,6 +17,18 @@ __all__ = [
     "render_map_view_toggle",
     "render_month_range_selector",
 ]
+
+TERRAIN_NOTE = (
+    "Mountain region: at 0.25° the forecast model and ERA5 represent terrain at different heights, "
+    "so part of the temperature bias and error here reflects terrain representation, "
+    "not forecast error."
+)
+
+CENTRED_ACC_NOTE = (
+    "ACC is centred: each forecast's regional mean anomaly is removed before correlating. "
+    "Smaller regions have less spatial anomaly variance, so their ACC is lower and reaches the "
+    "0.6 line at shorter lead times than larger regions."
+)
 
 # Single CSS block — injected once by inject_card_styles(), not per card.
 CARD_STYLES = """

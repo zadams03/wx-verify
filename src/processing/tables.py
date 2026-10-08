@@ -41,6 +41,32 @@ def _complete_months() -> list:
     ]
 
 
+def dashboard_size_mb() -> float:
+    """Total size of the committed dashboard data folder in MB (1 MB = 1,000,000 bytes)."""
+    root = paths.dashboard_dir()
+    if not root.exists():
+        return 0.0
+    return sum(f.stat().st_size for f in root.rglob("*") if f.is_file()) / 1e6
+
+
+def check_size_budget(budget_mb: float) -> tuple[float, bool]:
+    """Compare data/dashboard/ with the budget; log a warning when it is exceeded.
+
+    Returns (size_mb, within_budget). The remedy (SPEC 4.4 item 5 / Section 7) is to
+    move the map files to cloud hosting — resolution is not reduced to fit.
+    """
+    size = dashboard_size_mb()
+    if size > budget_mb:
+        logger.warning(
+            "SIZE BUDGET EXCEEDED: data/dashboard/ is %.1f MB, budget is %.0f MB — "
+            "move the map files to cloud hosting (SPEC Section 7) rather than reducing resolution",
+            size, budget_mb,
+        )
+        return size, False
+    logger.info("Dashboard data: %.1f MB of %.0f MB budget", size, budget_mb)
+    return size, True
+
+
 def _write_parquet(df: pd.DataFrame, out) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_suffix(".parquet.part")
