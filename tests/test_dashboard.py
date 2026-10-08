@@ -249,3 +249,68 @@ def test_acc_difference_map_is_ecmwf_minus_gfs_temporal_acc_from_the_paired_map_
     lat, lon, val = _arr(trace["lat"]), _arr(trace["lon"]), _arr(trace["marker"]["color"])
     for i in np.linspace(0, len(val) - 1, 7).astype(int):
         assert val[i] == pytest.approx(float(diff.sel(latitude=lat[i], longitude=lon[i])), abs=1e-4)
+
+
+# ---------------------------------------------------------------------------
+# Phase 10: variables and domains
+# ---------------------------------------------------------------------------
+
+def _have(variable: str, domain: str | None = None) -> bool:
+    import pandas as pd
+    f = paths.REPO_ROOT / "data" / "dashboard" / "region_monthly.parquet"
+    if not f.exists():
+        return False
+    df = pd.read_parquet(f, columns=["variable", "domain"])
+    return bool(((df.variable == variable) & ((df.domain == domain) if domain else True)).any())
+
+
+def _variable_app(variable: str, region: str = "European Alps", domain: str | None = None) -> AppTest:
+    at = AppTest.from_file(str(APP), default_timeout=90).run()
+    _select(at, "Variable", variable)
+    if domain:
+        _select(at, "Domain", domain)
+    return _select(at, "Region", region)
+
+
+@pytest.mark.skipif(not _have("frzl"), reason="freezing level not built")
+def test_freezing_level_shows_bias_and_rmse_only():
+    from src.viz.components import freezing_level_note  # noqa: F401
+    at = _variable_app("frzl")
+    assert next(r for r in at.radio if r.label == "Map view").options == ["RMSE", "Bias"]
+    cards = " ".join(m.value for m in at.markdown)
+    assert "mc-label\">RMSE" in cards and "mc-label\">Bias" in cards and "ACC (centred)" not in cards
+    assert "Skill Threshold" not in cards
+    captions = [c.value for c in at.caption]
+    assert CENTRED_ACC_NOTE not in captions
+    note = next(c for c in captions if c.startswith("Freezing level:") and "excluded" in c)
+    assert "%" in note
+    fig = _figures(at)[0]
+    assert [t["name"] for t in fig["data"]] == ["RMSE (m)", "Bias (m)"]
+
+
+@pytest.mark.skipif(not _have("msl"), reason="msl not built")
+def test_terrain_caveat_covers_pressure_and_wind_but_not_z500():
+    from src.viz.components import terrain_note
+    assert terrain_note("msl") in [e.value for e in _variable_app("msl").info]
+    if _have("ws10"):
+        assert terrain_note("ws10") in [e.value for e in _variable_app("ws10").info]
+    if _have("z500"):
+        assert not [e for e in _variable_app("z500").info if "Mountain region" in e.value]
+
+
+@pytest.mark.skipif(not _have("z500", "north_america_west"), reason="north_america_west not built")
+def test_north_america_domain_lists_its_regions_and_units():
+    at = _variable_app("z500", "Rockies", "north_america_west")
+    assert next(s for s in at.selectbox if s.label == "Region").options == ["Pacific Northwest", "Western Canada", "Rockies"]
+    cards = " ".join(m.value for m in at.markdown)
+    import re
+    assert re.search(r"RMSE</div><div class=\"mc-value\">\d+\.\d\d m<", cards)      # RMSE card carries the unit
+    assert "ACC (centred)" in cards
+
+
+@pytest.mark.skipif(not _have("frzl"), reason="freezing level not built")
+def test_comparison_mode_only_offers_variables_both_models_have():
+    at = AppTest.from_file(str(APP), default_timeout=90).run()
+    _select(at, "Model", CMP)
+    options = next(s for s in at.selectbox if s.label == "Variable").options
+    assert "Freezing level" not in options and "2m Temperature" in options
