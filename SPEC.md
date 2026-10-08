@@ -145,9 +145,10 @@ wx-verify/
 ├── logs/                      ← gitignored. pipeline.log, pid file
 │
 ├── src/
-│   ├── pipeline.py            ← Resumable runner CLI (python -m src.pipeline)
+│   ├── pipeline.py            ← Resumable runner CLI (python -m src.pipeline; --compare, --no-tables, --tables-only, --force, --keep-raw)
 │   ├── data/
 │   │   ├── base_fetcher.py    ← Abstract base class — fetch_month(variable, domain, year, month)
+│   │   ├── byterange.py       ← Shared byte-range fetcher (parallel requests, retries, present mask) for GFS and ECMWF
 │   │   ├── registry.py        ← Variable registry: per-source field names and unit conversions
 │   │   ├── gfs_fetcher.py     ← GFS archive acquisition (AWS byte-range)
 │   │   ├── gfs_ncar_fetcher.py← GFS long record (NCAR RDA) — Phase 12
@@ -159,7 +160,8 @@ wx-verify/
 │   │   ├── climatology.py     ← 1991–2020 normal; anomalies by valid month and hour
 │   │   ├── metrics.py         ← Sufficient statistics; bias, RMSE, temporal/spatial (centred + uncentred) ACC
 │   │   ├── aggregate.py       ← Monthly aggregation, validation, atomic writes
-│   │   └── tables.py          ← Region, coverage and map tables for the dashboard
+│   │   ├── tables.py          ← Region, coverage and map tables for the dashboard
+│   │   └── pairing.py         ← Paired (same-runs) aggregation for model comparisons
 │   │
 │   ├── utils/
 │   │   ├── config.py          ← Typed, validating config loader
@@ -255,7 +257,7 @@ Goal: least disk space, exact metrics for any date window, and a small committed
 1. **Raw** (`data/raw/{source}/{domain}/…`, gitignored): only the configured domains, only 00z/12z. GFS global fields are subset to each domain in memory at fetch time. Deleted after aggregation when `keep_raw: false`.
 2. **Monthly aggregates** (`data/processed/aggregates/{model}/{variable}/{domain}/{YYYY-MM}.nc`, gitignored): per grid point and lead time, the sufficient statistics — count, Σe, Σe², Σf′, Σo′, Σf′², Σo′², Σf′o′ (e = forecast − ERA5, ′ = anomaly vs climatology); for precipitation, contingency counts (hits, misses, false alarms, correct negatives) per threshold. Any date window's grid-point bias/RMSE/temporal ACC is an exact sum over months.
 3. **Region tables** (`data/dashboard/region_monthly.parquet`, committed): per model × variable × region × lead time × month — area-weighted pooled sums for bias/RMSE, the sum and count of per-forecast spatial ACC, and pooled contingency counts. Skill curves and metric cards are exact for any month window.
-4. **Map tables** (`data/dashboard/maps/…`, committed): grid-point statistics summed per **year** at native 0.25°, float32 + zlib, storing only what the maps need (n, Σe, Σe², Σf′², Σo′², Σf′o′ — n may be stored per lead time if constant). Maps for a selected window use the whole years it covers; the dashboard states this. Resolution is never reduced to meet the budget; map files move to cloud hosting instead.
+4. **Map tables** (`data/dashboard/maps/…`, committed): grid-point statistics summed per **year** at native 0.25°, float32 + zlib, storing only what the maps need (n, Σe, Σe², Σf′², Σo′², Σf′o′ — n may be stored per lead time if constant). Maps for a selected window use the whole years it covers; the dashboard states this. Resolution is never reduced to meet the budget; map files move to cloud hosting instead. Paired (comparison) map files are written only for years whose paired run set differs from the standalone one; otherwise the dashboard reads the standalone file.
 5. **Size budget:** committed `data/dashboard/` ≤ 150 MB (config). Each phase reports actual size. If exceeded, fall back to cloud hosting (Section 7).
 
 Consequences:
@@ -432,6 +434,13 @@ Build steps:
 65. Dashboard comparison mode (model selector gains "GFS vs ECMWF"): overlaid skill curves (both models, same runs); metric cards for both; spatial difference map RMSE_GFS − RMSE_ECMWF (diverging scale, positive = ECMWF more accurate) with an option for bias of each model; period selector limited to the common period; header states paired run count; ERA5-lineage caveat (3.8) always visible in comparison mode; IFS cycle changes inside the window listed. ✓
 66. Sanity checks: ECMWF standalone 24h RMSE and ACC plausible and better than or comparable to GFS; paired and standalone GFS numbers agree closely where run sets match; hand check of one region for one month. ✓
 67. Audit, dead code removal, commit "Phase 9 complete — ECMWF comparison". ✓
+
+**Phase 9 build notes (Oct 2026 audit):**
+- All 1,926 ECMWF runs and all 1,926 GFS runs in the common period verified; run sets identical in all 32 months, so no re-pairing occurred. The differing-run path is covered by synthetic tests and a real-data scratch experiment (paired + dropped run = standalone to floating-point precision).
+- Paired aggregates live under `aggregates/compare/gfs_vs_ecmwf/{model}/{variable}/{domain}/` with per-month `_pairing/` records; coverage stores included init times per model and month.
+- Step 66: no published ECMWF-vs-GFS T2m comparison against ERA5 for Europe found; accepted on internal evidence (independent numpy recomputation of ECMWF, European Alps, 2024-03 matched to 5 decimals).
+- Addition beyond spec (approved): ACC difference map (ECMWF − GFS) in comparison mode.
+- Headline (paired, 1,926 runs): Western Europe 24h RMSE GFS 1.40 °C vs ECMWF 1.18 °C; European Alps 1.89 vs 1.88 °C — ECMWF's advantage largely disappears in the Alps.
 
 ---
 
