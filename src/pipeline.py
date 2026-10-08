@@ -20,6 +20,7 @@ import pandas as pd
 import xarray as xr
 
 from src.data.base_fetcher import BaseFetcher
+from src.data.ecmwf_fetcher import ECMWFFetcher
 from src.data.era5_fetcher import ERA5Fetcher, required_hours
 from src.data.gfs_fetcher import GFSFetcher
 from src.processing.aggregate import aggregate_month, is_month_done, write_aggregate
@@ -29,7 +30,7 @@ from src.utils.config import Config, load_config
 
 logger = logging.getLogger(__name__)
 
-FETCHERS: dict[str, type[BaseFetcher]] = {"gfs": GFSFetcher}
+FETCHERS: dict[str, type[BaseFetcher]] = {"gfs": GFSFetcher, "ecmwf": ECMWFFetcher}
 
 
 def month_label(year: int, month: int) -> str:

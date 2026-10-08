@@ -38,6 +38,22 @@ class GFSField:
 
 
 @dataclass(frozen=True)
+class ECMWFField:
+    """A field in an ECMWF open-data GRIB2 file, located through its JSON-lines index.
+
+    param / levtype / levelist are matched exactly against the index entry
+    (levelist None means the entry must have no ``levelist`` key).
+    """
+
+    param: str
+    levtype: str
+    grib_filter: dict[str, Any]
+    short_name: str
+    levelist: str | None = None
+    conversion: UnitConversion = field(default_factory=UnitConversion)
+
+
+@dataclass(frozen=True)
 class ERA5Field:
     """A field in the ERA5 single-levels CDS dataset."""
 
@@ -51,11 +67,12 @@ class VariableSpec:
     key: str
     valid_range: tuple[float, float]   # plausible values in display units
     gfs: GFSField | None = None
+    ecmwf: ECMWFField | None = None
     era5: ERA5Field | None = None
 
-    def source_field(self, source: str) -> GFSField | ERA5Field:
-        """Return the field definition for ``source`` ('gfs' or 'era5')."""
-        entry = getattr(self, source, None) if source in ("gfs", "era5") else None
+    def source_field(self, source: str) -> GFSField | ECMWFField | ERA5Field:
+        """Return the field definition for ``source`` ('gfs', 'ecmwf' or 'era5')."""
+        entry = getattr(self, source, None) if source in ("gfs", "ecmwf", "era5") else None
         if entry is None:
             raise ValueError(
                 f"Variable '{self.key}' has no registry entry for source '{source}'"
@@ -72,6 +89,13 @@ VARIABLES: dict[str, VariableSpec] = {
         gfs=GFSField(
             idx_name="TMP",
             idx_level="2 m above ground",
+            grib_filter={"typeOfLevel": "heightAboveGround", "level": 2},
+            short_name="t2m",
+            conversion=_KELVIN_TO_CELSIUS,
+        ),
+        ecmwf=ECMWFField(
+            param="2t",
+            levtype="sfc",
             grib_filter={"typeOfLevel": "heightAboveGround", "level": 2},
             short_name="t2m",
             conversion=_KELVIN_TO_CELSIUS,

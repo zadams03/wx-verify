@@ -9,13 +9,13 @@ models:
       - {name: aws,  start: "2021-03-23", end: "2026-09-20"}
       - {name: ncar, start: "2015-01-15", end: "2021-03-22", enabled: false}   # Phase 12
   ecmwf:
-    enabled: false              # Phase 9
+    enabled: true               # Phase 9
     sources:
       - {name: aws,  start: "2024-02-01", end: "2026-09-20"}
 
 model_versions:                 # vertical markers on time-based views
   gfs:   [{name: "v15", date: "2019-06-12"}, {name: "v16", date: "2021-03-22"}]
-  ecmwf: []                     # filled at Phase 9 kickoff
+  ecmwf: [{name: "49r1", date: "2024-11-12"}, {name: "50r1", date: "2026-05-12"}]
 
 variables:
   t2m:  {long_name: "2m Temperature", units: "°C", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: true}

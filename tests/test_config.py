@@ -34,11 +34,15 @@ def test_repo_config_loads():
     cfg = load_config()
     assert cfg.lead_times_hours == [24, 48, 72, 120, 240]
     assert cfg.runs == ["00", "12"]
-    assert cfg.enabled_models() == ["gfs"]
+    assert cfg.enabled_models() == ["gfs", "ecmwf"]
     assert cfg.enabled_variables() == ["t2m"]
     assert cfg.enabled_domains() == ["europe"]
     assert cfg.models["gfs"].start == date(2021, 3, 23)
     assert cfg.models["gfs"].end == date(2026, 9, 20)
+    assert cfg.models["ecmwf"].start == date(2024, 2, 1)
+    assert cfg.models["ecmwf"].end == date(2026, 9, 20)
+    assert [(v.name, v.date) for v in cfg.model_versions["ecmwf"]] == [
+        ("49r1", date(2024, 11, 12)), ("50r1", date(2026, 5, 12))]
 
 
 def test_repo_config_europe_regions():
@@ -232,7 +236,7 @@ def test_registry_unknown_variable():
 
 def test_registry_missing_source():
     with pytest.raises(ValueError, match="no registry entry"):
-        get_variable("t2m").source_field("ecmwf")
+        get_variable("t2m").source_field("ncar")
 
 
 def test_every_enabled_config_variable_is_registered():
