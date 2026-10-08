@@ -19,10 +19,10 @@ model_versions:                 # vertical markers on time-based views
 
 variables:
   t2m:  {long_name: "2m Temperature", units: "°C", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: true}
-  msl:  {long_name: "Mean sea level pressure", units: "hPa", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: false}
-  z500: {long_name: "500 hPa geopotential height", units: "m", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: false}
-  ws10: {long_name: "10m wind speed", units: "m/s", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: false}
-  frzl: {long_name: "Freezing level", units: "m", scores: [bias, rmse, acc], models: [gfs], enabled: false}
+  msl:  {long_name: "Mean sea level pressure", units: "hPa", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: true}
+  z500: {long_name: "500 hPa geopotential height", units: "m", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: true}
+  ws10: {long_name: "10m wind speed", units: "m/s", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: true}
+  frzl: {long_name: "Freezing level", units: "m", scores: [bias, rmse], models: [gfs], enabled: true}
   tp24: {long_name: "24h precipitation", units: "mm", scores: [freq_bias, ets, bias], thresholds: [1, 5, 10], models: [gfs, ecmwf], enabled: false}
   swe:  {long_name: "Snow water equivalent", units: "mm", scores: [bias, rmse], models: [gfs, ecmwf], enabled: false}
 
@@ -41,7 +41,7 @@ domains:
       "Norwegian Mountains": {lat_min: 58, lat_max: 71, lon_min: 5,   lon_max: 31, mountain: true}
   north_america_west:
     bounds: {lat_min: 36, lat_max: 62, lon_min: -140, lon_max: -102}
-    enabled: false              # Phase 10
+    enabled: true
     regions:
       "Pacific Northwest": {lat_min: 42, lat_max: 49, lon_min: -125, lon_max: -116, mountain: true}
       "Western Canada":    {lat_min: 49, lat_max: 60, lon_min: -135, lon_max: -110, mountain: true}
