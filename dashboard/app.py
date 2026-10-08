@@ -18,7 +18,6 @@ if str(_REPO_ROOT) not in sys.path:
 from src.utils.config import load_config
 from src.viz.components import (
     LEAD_TIMES,
-    REGION_PRESETS,
     inject_card_styles,
     render_date_range_selector,
     render_lead_time_selector,
@@ -177,7 +176,6 @@ spatial: dict[str, xr.DataArray | None] = {
     name: _load_spatial(name) for name in ("bias", "rmse", "acc")
 }
 has_data = summary_df is not None
-has_spatial = any(v is not None for v in spatial.values())
 
 aligned_ds = _load_aligned_all()
 has_aligned = aligned_ds is not None
@@ -223,7 +221,7 @@ with st.sidebar:
         st.caption("config.yaml not found")
 
     st.divider()
-    st.caption("v1.0 · May 2026")
+    st.caption("v1.1 · October 2026")
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +294,11 @@ st.markdown("---")
 col_left, col_right = st.columns([3, 2], gap="medium")
 
 with col_left:
-    fig_curves = build_skill_curves(region_summary, region_name)
+    fig_curves = build_skill_curves(
+        region_summary,
+        region_name,
+        lead_times=cfg.lead_times_hours if cfg is not None else None,
+    )
     st.plotly_chart(fig_curves, width="stretch")
 
 with col_right:

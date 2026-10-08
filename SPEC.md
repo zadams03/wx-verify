@@ -1,6 +1,6 @@
 # wx-verify
 ## NWP Forecast Verification Dashboard
-**Technical Project Specification · Version 1.0 — Complete · May 2026**
+**Technical Project Specification · Version 1.1 — Complete · October 2026**
 Personal Research Project · GitHub: github.com/zadams03/wx-verify
 
 ---
@@ -302,6 +302,11 @@ Build steps:
 | 001 | Phase 1 | `requirements.txt` has pinned dependency versions incompatible with Python 3.14. Newer compatible versions installed in practice. | Resolved — requirements.txt updated to Python 3.14-compatible versions (May 2026) |
 | 002 | Phase 3 | cfgrib on Windows requires `ecmwflibs` package to supply the ecCodes native DLL. Handled automatically in `gfs_fetcher.py` but `ecmwflibs` is not yet in `requirements.txt`. | Resolved — `ecmwflibs==0.7.0` added to requirements.txt (May 2026) |
 | 003 | Phase 3 | GFS byte-range extraction used instead of full GRIB2 download (~350 KB per file vs ~400 MB). More efficient but dependent on `.idx` index files being present on AWS S3. | Noted for reference |
+| 004 | Phase 7 | Whitespace gap before first data point on log x-axis of skill curves | Resolved — explicit axis range derived from config lead times (Oct 2026) |
+| 005 | Phase 7 | ecmwflibs Windows-only; breaks/unnecessary on macOS | Resolved — platform marker in requirements.txt (Oct 2026) |
+| 006 | Phase 7 | data/processed/ is committed to git (~35 MB) for Streamlit Cloud deployment, diverging from Phase 1 step 7 | Open — to be redesigned in Phase 8 |
+| 007 | Refinement | Date range selector recomputes from aligned_test_jan2023.nc (32 MB), so sub-period recomputation only covers January 2023 test data | Open — to be redesigned in Phase 8 |
+| 008 | Session 1 | Integration tests in test_era5_fetcher.py and test_alignment.py fail rather than skip when CDS credentials or raw data are absent | Open |
 
 ---
 
@@ -314,9 +319,8 @@ Build steps:
 | Additional variables | 10m wind speed, 500hPa geopotential height are config changes plus minor fetcher additions. Precipitation requires additional skill scores such as ETS. |
 | Ensemble verification | GFS ensemble spread/skill relationship. Requires ensemble archive access. |
 | Seasonal breakdown | Skill scores stratified by season — winter vs summer performance differences. |
-| Extended domain | Add North Atlantic, North America as selectable regions via config. |
 | Regional sub-selection | User draws a custom bounding box on the map to define an arbitrary region for metric computation. Requires interactive map selection. |
-| Additional regions | North Atlantic, North America as selectable regions via config. |
+| Extended domain / additional regions | North Atlantic, North America as selectable regions via config. |
 | Project 2 hook | Statistical downscaling layer — if pursued, this repo extends into a Phase 8. Decision made in Claude.ai before any code is written. |
 | Date range pipeline trigger | Trigger new ERA5/GFS fetch from dashboard for a different date range. Level 3 feature. |
 | Cloud data hosting | Host processed metric files on cloud storage rather than in git repo. |
@@ -402,7 +406,7 @@ streamlit run dashboard/app.py  # test dashboard locally
 
 ---
 
-## 10. Environment Variables & Secrets
+## 11. Environment Variables & Secrets
 
 ```
 # .env (never commit this file — it is in .gitignore)
@@ -414,5 +418,5 @@ CDS_API_KEY=your-key-here
 
 ---
 
-*wx-verify · Version 1.0 · May 2026*
+*wx-verify · Version 1.1 · October 2026*
 *Spec is always the source of truth. Update here before building anywhere.*

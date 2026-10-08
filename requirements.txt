@@ -4,7 +4,7 @@ numpy==2.4.6
 scipy==1.17.1
 cfgrib==0.9.15.1
 eccodes==2.47.0
-ecmwflibs==0.7.0
+ecmwflibs==0.7.0; sys_platform == "win32"
 cdsapi==0.7.7
 plotly==6.7.0
 streamlit==1.57.0

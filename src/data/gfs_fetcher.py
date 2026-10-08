@@ -28,7 +28,6 @@ if sys.platform == "win32":
 import cfgrib  # noqa: E402
 
 from src.data.base_fetcher import BaseFetcher
-from src.utils.config import Config
 
 logger = logging.getLogger(__name__)
 

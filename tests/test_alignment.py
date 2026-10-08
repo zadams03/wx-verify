@@ -107,7 +107,7 @@ def test_spot_check_grid_point(aligned, era5_jan):
         .sel(latitude=lat_pt, longitude=lon_pt, method="nearest")
     ) - 273.15
 
-    print(f"\nSpot check — 51°N 0°E, 2023-01-01 00z +24h (valid: 2023-01-02 00z)")
+    print("\nSpot check — 51°N 0°E, 2023-01-01 00z +24h (valid: 2023-01-02 00z)")
     print(f"  GFS forecast : {fc_val:+.2f} °C")
     print(f"  Aligned obs  : {obs_val:+.2f} °C")
     print(f"  ERA5 direct  : {era5_direct:+.2f} °C")

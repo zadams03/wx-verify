@@ -5,8 +5,6 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-LEAD_TIMES = [24, 48, 72, 120, 240]
-
 _COLOR_ACC = "#2ca02c"
 _COLOR_RMSE = "#d62728"
 _COLOR_BIAS = "#1f77b4"
@@ -20,10 +18,16 @@ _TICK_VALS = [24, 48, 72, 120, 240]
 _TICK_TEXT = [f"{h}h" for h in _TICK_VALS]
 _INTERMEDIATE_GRIDLINES = [96, 144, 168, 192, 216]
 
+# X-axis padding either side of the configured lead times (multiplicative,
+# since the axis is logarithmic).
+_X_PAD_LOW = 0.75
+_X_PAD_HIGH = 1.08
+
 
 def build_skill_curves(
     summary_df: pd.DataFrame,
     region_name: str = "Western Europe",
+    lead_times: list[int] | None = None,
 ) -> go.Figure:
     """Plotly line chart of domain-mean RMSE, ACC, and Bias vs lead time.
 
@@ -31,6 +35,8 @@ def build_skill_curves(
     Labels only at the 5 data points (24/48/72/120/240h).
     Y-axes: ACC on left [0–1], RMSE/Bias (°C) on right.
     ACC=0.6 skill threshold reference line.
+    X-axis range is derived from ``lead_times`` (config lead_times_hours);
+    falls back to the lead times present in ``summary_df``.
     """
     fig = make_subplots(specs=[[{"secondary_y": True}]])
 
@@ -38,6 +44,13 @@ def build_skill_curves(
     acc = summary_df["acc_mean"].tolist()
     rmse = summary_df["rmse_mean"].tolist()
     bias = summary_df["bias_mean"].tolist()
+
+    axis_lead_times = lead_times or lt
+    # Plotly log axes take the range in log10 units.
+    x_range = [
+        math.log10(_X_PAD_LOW * min(axis_lead_times)),
+        math.log10(_X_PAD_HIGH * max(axis_lead_times)),
+    ]
 
     # ACC — left y-axis
     fig.add_trace(
@@ -116,6 +129,7 @@ def build_skill_curves(
     # X-axis: logarithmic. Standard gridlines at the 5 data points; labels at data points only.
     fig.update_xaxes(
         type="log",
+        range=x_range,
         tickmode="array",
         tickvals=_TICK_VALS,
         ticktext=_TICK_TEXT,
