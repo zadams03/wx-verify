@@ -27,8 +27,9 @@ _ACC_SCALE = [
     [1.0, "#1a7837"],     # deep green (ACC = 1)
 ]
 
-# RMSE difference (model A − model B): positive means B has the smaller error. Purple/green
-# keeps it visually apart from the cold/warm blue-red of the bias map.
+# Difference maps, always oriented so positive means model B is better: RMSE A − B (B has the
+# smaller error) and ACC B − A (B has the higher correlation). Purple/green keeps them visually
+# apart from the cold/warm blue-red of the bias map.
 _DIFF_SCALE = [
     [0.0, "#762a83"],
     [0.25, "#c2a5cf"],
@@ -37,9 +38,9 @@ _DIFF_SCALE = [
     [1.0, "#1b7837"],
 ]
 
-_SCALES = {"rmse": _RMSE_SCALE, "bias": _BIAS_SCALE, "acc": _ACC_SCALE, "rmse_diff": _DIFF_SCALE}
-_TITLES = {"rmse": "RMSE", "bias": "Bias", "acc": "ACC Skill", "rmse_diff": "RMSE difference"}
-_TICK_FMT = {"rmse": ".2f", "bias": ".2f", "acc": ".2f", "rmse_diff": "+.2f"}
+_SCALES = {"rmse": _RMSE_SCALE, "bias": _BIAS_SCALE, "acc": _ACC_SCALE, "rmse_diff": _DIFF_SCALE, "acc_diff": _DIFF_SCALE}
+_TITLES = {"rmse": "RMSE", "bias": "Bias", "acc": "ACC Skill", "rmse_diff": "RMSE difference", "acc_diff": "ACC difference"}
+_TICK_FMT = {"rmse": ".2f", "bias": ".2f", "acc": ".2f", "rmse_diff": "+.2f", "acc_diff": "+.2f"}
 
 _GEO_DEFAULTS = dict(
     scope="world",
@@ -110,7 +111,7 @@ def _color_range(da_vals: np.ndarray, metric: str) -> tuple[float, float]:
     valid = da_vals[~np.isnan(da_vals)]
     if metric == "acc":
         return 0.0, 1.0
-    if metric in ("bias", "rmse_diff"):
+    if metric in ("bias", "rmse_diff", "acc_diff"):
         absmax = float(np.nanpercentile(np.abs(valid), 98)) if len(valid) else 1.0
         return -absmax, absmax
     lo = float(np.nanpercentile(valid, 2)) if len(valid) else 0.0
@@ -132,13 +133,14 @@ def build_spatial_map(
     """Plotly geographic scatter map of a single metric at a single lead time.
 
     metric_da: DataArray with dims (lead_time, latitude, longitude).
-    metric_name: 'rmse', 'bias', or 'acc' (temporal ACC at each grid cell).
+    metric_name: 'rmse', 'bias', or 'acc' (temporal ACC at each grid cell), or a difference map.
     units: display units for rmse and bias.
     view_bounds: lat/lon extent to show (a zoomed region or the whole domain). Only cells
       inside it are drawn. Defaults to the extent of the data.
     region_bounds: dict with lat_min, lat_max, lon_min, lon_max — highlighted on map.
-    metric_name 'rmse_diff': a model-A − model-B RMSE difference on a symmetric diverging scale;
-      pass ``title`` (e.g. "RMSE GFS − ECMWF") and ``colorbar_note`` (what positive means).
+    metric_name 'rmse_diff' / 'acc_diff': a difference between two models' metric on a symmetric
+      diverging scale; pass ``title`` (e.g. "RMSE GFS − ECMWF") and ``colorbar_note`` (what
+      positive means).
     title: overrides the metric's default name in the figure and colour bar titles.
     """
     da = metric_da.sel(lead_time=lead_time_h, method="nearest")
@@ -161,11 +163,12 @@ def build_spatial_map(
 
     colorscale = _SCALES[metric_name]
     title = title or _TITLES[metric_name]
-    units = "" if metric_name == "acc" else units
+    units = "" if metric_name in ("acc", "acc_diff") else units
     cmin, cmax = _color_range(vals_f, metric_name)
 
     hover_unit = f" {units}" if units else ""
-    hover_fmt = ".3f" if metric_name == "acc" else "+.2f" if metric_name in ("bias", "rmse_diff") else ".2f"
+    hover_fmt = (".3f" if metric_name == "acc" else "+.3f" if metric_name == "acc_diff"
+                 else "+.2f" if metric_name in ("bias", "rmse_diff") else ".2f")
     colorbar_label = f"{title} ({units})" if units else title
     if colorbar_note:
         colorbar_label += f"<br>{colorbar_note}"

@@ -86,3 +86,19 @@ def test_difference_map_uses_a_symmetric_scale_and_custom_titles():
     assert m.cmin == -m.cmax and m.cmax > 0
     assert "+ = ECMWF more accurate" in m.colorbar.title.text
     assert fig.layout.title.text.startswith("RMSE GFS − ECMWF")
+
+
+def test_acc_difference_map_is_symmetric_unitless_and_signed():
+    import numpy as np
+    import xarray as xr
+    from src.viz.spatial_maps import build_spatial_map
+    lat, lon = np.array([52.0, 51.75]), np.array([0.0, 0.25])
+    da = xr.DataArray(np.array([[[0.04, -0.01], [0.02, 0.0]]]), dims=("lead_time", "latitude", "longitude"),
+                      coords={"lead_time": [24], "latitude": lat, "longitude": lon})
+    box = {"lat_min": 51.5, "lat_max": 52.0, "lon_min": 0.0, "lon_max": 0.25}
+    fig = build_spatial_map(da, "acc_diff", 24, box, "X", "°C", title="ACC ECMWF − GFS",
+                            colorbar_note="+ = ECMWF more accurate")
+    m = fig.data[0].marker
+    assert m.cmin == -m.cmax and m.cmax > 0
+    assert "°C" not in m.colorbar.title.text                       # ACC has no units
+    assert "+.3f" in fig.data[0].hovertemplate

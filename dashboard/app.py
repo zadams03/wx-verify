@@ -269,13 +269,15 @@ with col_right:
     if comparison:
         stats = {m: _load_map_stats(m, variable, domain, tuple(years), comparison) for m in pair}
         if all(v is not None for v in stats.values()):
-            if map_view == "rmse_diff":
-                a_name, b_name = (m.upper() for m in pair)
-                da = map_metrics(stats[pair[0]])["rmse"] - map_metrics(stats[pair[1]])["rmse"]
-                map_fig = build_spatial_map(
-                    da, "rmse_diff", lead_time_h, region_bounds, region_name, units, view,
-                    title=f"RMSE {a_name} − {b_name}",
-                    colorbar_note=f"+ = {b_name} more accurate")
+            a_name, b_name = (m.upper() for m in pair)
+            if map_view in ("rmse_diff", "acc_diff"):
+                a_metrics, b_metrics = (map_metrics(stats[m]) for m in pair)
+                if map_view == "rmse_diff":
+                    da, name = a_metrics["rmse"] - b_metrics["rmse"], f"RMSE {a_name} − {b_name}"
+                else:
+                    da, name = b_metrics["acc"] - a_metrics["acc"], f"ACC {b_name} − {a_name}"
+                map_fig = build_spatial_map(da, map_view, lead_time_h, region_bounds, region_name, units, view,
+                                            title=name, colorbar_note=f"+ = {b_name} more accurate")
             else:
                 which = pair[0] if map_view == "bias:a" else pair[1]
                 map_fig = build_spatial_map(map_metrics(stats[which])["bias"], "bias", lead_time_h,
@@ -300,6 +302,10 @@ with col_right:
             st.caption(f"Difference of the two models' grid-point RMSE over the same runs "
                        f"({pair[0].upper()} − {pair[1].upper()}); positive means {pair[1].upper()} had the "
                        f"smaller error.")
+        elif comparison and map_view == "acc_diff":
+            st.caption(f"Difference of the two models' grid-point temporal ACC over the same runs "
+                       f"({pair[1].upper()} − {pair[0].upper()}); positive means {pair[1].upper()} had the "
+                       f"higher correlation.")
         st.caption("Map ACC is the temporal correlation of anomalies at each grid cell.")
 
 # ---------------------------------------------------------------------------

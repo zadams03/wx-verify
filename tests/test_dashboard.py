@@ -221,3 +221,30 @@ def test_standalone_mode_is_unchanged_by_the_paired_rows():
     assert any("runs verified" in c.value for c in at.caption)
     assert not any("paired runs" in c.value for c in at.caption)
     assert len(at.select_slider[0].options) == 67                       # GFS: all of its months
+
+
+@needs_pairs
+def test_acc_difference_map_is_ecmwf_minus_gfs_temporal_acc_from_the_paired_map_files():
+    import numpy as np
+    import xarray as xr
+    from src.processing.metrics import map_metrics
+    at = _cmp_app()
+    radio = next(r for r in at.radio if r.label == "Map view")
+    assert "ACC difference (ECMWF − GFS)" in radio.options
+    radio.set_value("ACC difference (ECMWF − GFS)").run()
+    assert not at.exception
+    m = next(f for f in _figures(at) if f["data"][0]["type"] == "scattergeo")
+    assert m["layout"]["title"]["text"].startswith("ACC ECMWF − GFS")
+    trace = m["data"][0]
+    assert "+ = ECMWF more accurate" in trace["marker"]["colorbar"]["title"]["text"]
+    assert trace["marker"]["cmin"] == pytest.approx(-trace["marker"]["cmax"])        # symmetric about zero
+
+    acc = {}
+    for model in ("gfs", "ecmwf"):
+        parts = [xr.load_dataset(paths.resolve_map_file(model, "t2m", "europe", y, CMP)).astype("float64")
+                 for y in (2024, 2025, 2026)]
+        acc[model] = map_metrics(sum(parts[1:], parts[0]))["acc"].sel(lead_time=24)
+    diff = acc["ecmwf"] - acc["gfs"]                                                 # positive = ECMWF better
+    lat, lon, val = _arr(trace["lat"]), _arr(trace["lon"]), _arr(trace["marker"]["color"])
+    for i in np.linspace(0, len(val) - 1, 7).astype(int):
+        assert val[i] == pytest.approx(float(diff.sel(latitude=lat[i], longitude=lon[i])), abs=1e-4)

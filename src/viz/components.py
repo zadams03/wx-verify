@@ -205,13 +205,14 @@ def render_map_toggle(key: str = "map_metric") -> str:
 # Comparison-mode map views: key -> label. {a} and {b} are the two model names.
 COMPARISON_MAP_VIEWS = {
     "rmse_diff": "RMSE difference ({a} − {b})",
+    "acc_diff": "ACC difference ({b} − {a})",
     "bias:a": "Bias — {a}",
     "bias:b": "Bias — {b}",
 }
 
 
 def render_comparison_map_toggle(model_a: str, model_b: str, key: str = "cmp_map_metric") -> str:
-    """Map view for a head-to-head. Returns 'rmse_diff', 'bias:a' or 'bias:b'."""
+    """Map view for a head-to-head. Returns 'rmse_diff', 'acc_diff', 'bias:a' or 'bias:b'."""
     labels = {v.format(a=model_a.upper(), b=model_b.upper()): k for k, v in COMPARISON_MAP_VIEWS.items()}
     return labels[st.radio("Map view", list(labels), key=key)]
 
