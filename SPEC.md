@@ -62,7 +62,7 @@ This project is explicitly a learning exercise in parallel with a portfolio deli
 |---|---|---|---|
 | GFS | NOAA AWS S3 (`noaa-gfs-bdp-pds`) | 2021-03-23 → 2026-09-20 | First full day of GFS v16 (v16 began 2021-03-22 12z; earlier runs use a different S3 layout). Byte-range downloads via `.idx`, exact field-name match. |
 | GFS (long record) | NCAR RDA `d084001` | 2015-01-15 → 2021-03-22 | Phase 12. Same 0.25° grids. Access method verified at Phase 12 kickoff. |
-| ECMWF IFS HRES | ECMWF open data, AWS mirror | 2024-02-01 → 2026-09-20 | 0.25° from 1 Feb 2024 (0.4° before — excluded). |
+| ECMWF IFS HRES | ECMWF open data, AWS mirror (`s3://ecmwf-forecasts`) | 2024-02-01 → 2026-09-20 | 0.25° from 1 Feb 2024 (0.4° before — excluded). Path layout changes at 2024-02-28 12z (`{date}/{HH}z/0p25/oper/` → `{date}/{HH}z/ifs/0p25/oper/`); JSON-lines index with byte offsets, matched on parsed keys. All 1,926 runs present. |
 
 - Runs: **00z and 12z only** (ECMWF open data only goes to 240h+ from these runs; halves volume).
 - Model upgrades within the record are recorded in config (`model_versions`) and marked on all time-based views — see 3.8.
@@ -116,7 +116,8 @@ Definitions (fixed from Phase 8):
 - **Terrain mismatch.** At 0.25° each model and ERA5 represent mountains at different heights. In mountain regions, part of the T2m and freezing-level "bias" reflects terrain representation, not forecast error.
 - **Model upgrades.** Skill changes across an upgrade date may reflect the model change. Known dates (config `model_versions`):
   - GFS v15 (FV3 core): 2019-06-12 12z · GFS v16: 2021-03-22 12z · GFS v17: proposed Oct 2026 (after record end)
-  - Earlier GFS (v13, v14) and ECMWF IFS cycles (48r1, 49r1, 50r1 — 13 May 2026) to be confirmed at Phase 9/12 kickoff.
+  - ECMWF IFS 49r1: 2024-11-12 (first 00z/12z run affected: 12z) · IFS 50r1 (with AIFS v2): 2026-05-12 (first affected: 12z). 48r1 (2023-06-27) is before the ECMWF record.
+  - Earlier GFS (v13, v14) to be confirmed at Phase 12 kickoff.
 - **ERA5 snow and precipitation** are weaker truth than ERA5 temperature or pressure, especially in complex terrain.
 
 ---
@@ -426,7 +427,7 @@ Build steps:
 Build steps:
 61. Kickoff checks (report before building): ECMWF open data on AWS — bucket, path and index-file layout (and whether it changed during the period), byte-range feasibility, 00z/12z availability for every day in the period (exact count of missing runs), parameter names for this and later phases (`2t`, `msl`, `10u`, `10v`, `gh` @500, `tp`, `sd`), grid (0.25°, longitude convention, latitude order); confirm IFS cycle dates within the period for `model_versions`; estimate download volume and runtime.
 62. `ecmwf_fetcher.py` extending `base_fetcher`, same interface as GFS (domain subset in memory, retries, present mask). Registry entry for ECMWF `t2m`. Enable `ecmwf` in config.
-63. Paired aggregation. The head-to-head uses only runs included for **both** models (homogeneous sample across models, SPEC 3.7). Each model's standalone aggregates stay as they are (each model's own homogeneous sample). For any month where the two run sets differ, also write comparison aggregates for both models over the intersected run set under `data/processed/aggregates/compare/gfs_vs_ecmwf/…` (re-fetching GFS for those months if raw is gone). Region and map tables gain a `comparison` key so the dashboard can read paired statistics. Coverage table records paired run counts.
+63. Paired aggregation. The head-to-head uses only runs included for **both** models (homogeneous sample across models, SPEC 3.7). Each model's standalone aggregates stay as they are (each model's own homogeneous sample). For any month where the two run sets differ, also write comparison aggregates for both models over the intersected run set under `data/processed/aggregates/compare/gfs_vs_ecmwf/…` (re-fetching GFS for those months if raw is gone). Region and map tables gain a `comparison` key so the dashboard can read paired statistics. Coverage records the included run list (init times) per model and month, so pairing compares actual run sets, not counts; paired run counts are shown in the coverage table.
 64. Run ECMWF T2m Europe for the full period, then the paired build. Report runs per model, paired runs, months that needed re-pairing, committed size vs budget.
 65. Dashboard comparison mode (model selector gains "GFS vs ECMWF"): overlaid skill curves (both models, same runs); metric cards for both; spatial difference map RMSE_GFS − RMSE_ECMWF (diverging scale, positive = ECMWF more accurate) with an option for bias of each model; period selector limited to the common period; header states paired run count; ERA5-lineage caveat (3.8) always visible in comparison mode; IFS cycle changes inside the window listed.
 66. Sanity checks: ECMWF standalone 24h RMSE and ACC plausible and better than or comparable to GFS; paired and standalone GFS numbers agree closely where run sets match; hand check of one region for one month.
@@ -441,7 +442,7 @@ Build steps:
 
 Build steps:
 68. Kickoff checks (report before building): GRIB/CDS names and units for every variable in every source; freezing-level height reference in GFS (`HGT` at 0°C isotherm) vs ERA5 (`deg0l`, height above surface) — convert to a common reference (above sea level using ERA5 orography) and mask where the freezing level is at the surface.
-69. Registry entries for `msl`, `z500`, `ws10`, `frzl`; enable in config. No new code paths beyond derived variables (`ws10`) and the freezing-level conversion.
+69. Pipeline processes all enabled models for a (variable, domain, month) in one pass, so ERA5 is fetched once per month and paired statistics come out directly. Registry entries for `msl`, `z500`, `ws10`, `frzl`; enable in config. No new code paths beyond derived variables (`ws10`) and the freezing-level conversion.
 70. Enable `north_america_west` and the new region presets (3.4).
 71. Run all enabled combinations. Report committed size vs budget.
 72. Dashboard: variable selector, per-variable units/colour scales; extend the mountain-region terrain caveat (55b) to freezing level and wind.
@@ -455,7 +456,7 @@ Build steps:
 **Learning checkpoint before starting:** Why RMSE is a poor score for precipitation (skewed, intermittent); contingency tables, frequency bias, ETS; how GFS and ECMWF store accumulated precipitation (GFS bucket resets vs ECMWF accumulation from initialisation); ERA5 precipitation and snow quality in mountains.
 
 Build steps:
-74. Kickoff checks: accumulation conventions per source; SWE field names/units (GFS `WEASD` kg m⁻², ECMWF/ERA5 `sd` m water equivalent) and availability across the whole record. If SWE is not consistently available, park it (Outstanding Issues) — do not force it.
+74. Kickoff checks: accumulation conventions per source; SWE field names/units (known from Phase 9: ECMWF open data has `sd` only from 2025-11-20, so ECMWF SWE is expected to be parked; GFS-only SWE is the fallback) (GFS `WEASD` kg m⁻², ECMWF/ERA5 `sd` m water equivalent) and availability across the whole record. If SWE is not consistently available, park it (Outstanding Issues) — do not force it.
 75. `tp24` derivation per source (24h window ending at each lead time); contingency-count aggregation; frequency bias and ETS.
 76. Dashboard: threshold selector; precipitation views show frequency bias and ETS instead of RMSE/ACC.
 77. `swe` (stretch) as a continuous variable.
