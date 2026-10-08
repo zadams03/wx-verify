@@ -157,9 +157,11 @@ def test_identical_run_sets_reuse_standalone_aggregates(root, monkeypatch):
     tables.build_map_tables(0.25)
     for m in ("gfs", "ecmwf"):
         pd.testing.assert_frame_equal(region_rows(CMP, m), region_rows("", m), check_dtype=False)
-        with xr.open_dataset(paths.map_dir(m, "t2m", "europe") / "2023.nc") as own, \
-                xr.open_dataset(paths.map_dir(m, "t2m", "europe", CMP) / "2023.nc") as pr:
-            xr.testing.assert_equal(own[list(tables.MAP_STAT_VARS)], pr[list(tables.MAP_STAT_VARS)])
+        # no duplicate paired map: the standalone one is the paired one
+        assert not paths.map_dir(m, "t2m", "europe", CMP).exists()
+        assert paths.resolve_map_file(m, "t2m", "europe", 2023, CMP) == paths.map_dir(m, "t2m", "europe") / "2023.nc"
+        with xr.open_dataset(paths.map_dir(m, "t2m", "europe") / "2023.nc") as ds:
+            assert "comparison" not in ds.attrs
     cov = pd.read_parquet(paths.dashboard_dir() / "coverage.parquet")
     paired = cov[cov["comparison"] == CMP]
     assert sorted(paired["model"]) == ["ecmwf", "gfs"] and (paired["n_runs_included"] == 3).all()
@@ -200,8 +202,11 @@ def test_run_missing_for_one_model_is_removed_from_both(root, monkeypatch):
     assert (region_rows(CMP, "gfs")["n_forecasts"] == 2).all()
     assert (region_rows("", "gfs")["n_forecasts"] == 3).all()
     assert (region_rows(CMP, "ecmwf")["n_forecasts"] == 2).all()
-    with xr.open_dataset(paths.map_dir("gfs", "t2m", "europe", CMP) / "2023.nc") as ds:
+    with xr.open_dataset(paths.resolve_map_file("gfs", "t2m", "europe", 2023, CMP)) as ds:
         assert ds.attrs["n_runs_included"] == 2 and ds.attrs["comparison"] == CMP
+    # ECMWF lost nothing to the pairing, so its standalone map is its paired map
+    assert paths.resolve_map_file("ecmwf", "t2m", "europe", 2023, CMP) == paths.map_dir("ecmwf", "t2m", "europe") / "2023.nc"
+    assert not paths.map_dir("ecmwf", "t2m", "europe", CMP).exists()
     with xr.open_dataset(paths.map_dir("gfs", "t2m", "europe") / "2023.nc") as ds:
         assert ds.attrs["n_runs_included"] == 3
 
@@ -236,3 +241,28 @@ def test_comparison_name_is_parsed():
     assert pairing.comparison_models("gfs_vs_ecmwf") == ("gfs", "ecmwf")
     with pytest.raises(ValueError):
         pairing.comparison_models("gfs")
+
+
+def test_paired_map_is_written_when_the_year_has_unpaired_months(root, monkeypatch):
+    """GFS has an extra month in the year that ECMWF lacks (like GFS Jan 2024): its paired
+    map must cover only the paired months, so it differs from the standalone map."""
+    gfs, ecmwf = make_fake("gfs", 3.0), make_fake("ecmwf", 4.0)
+    setup_models(monkeypatch, gfs, ecmwf)
+    pipeline.process_month(CFG_SMALL, "gfs", "t2m", "europe", 2023, 2, keep_raw=False)
+    assert pair()["identical"]
+    tables.build_map_tables(0.25)
+    with xr.open_dataset(paths.map_dir("gfs", "t2m", "europe", CMP) / "2023.nc") as ds:
+        assert ds.attrs["n_months"] == 1 and ds.attrs["n_runs_included"] == 3
+    with xr.open_dataset(paths.map_dir("gfs", "t2m", "europe") / "2023.nc") as ds:
+        assert ds.attrs["n_months"] == 2 and ds.attrs["n_runs_included"] == 6
+    assert not paths.map_dir("ecmwf", "t2m", "europe", CMP).exists()
+
+
+def test_stale_paired_map_is_removed_when_it_is_no_longer_needed(root, monkeypatch):
+    setup_models(monkeypatch, make_fake("gfs", 3.0), make_fake("ecmwf", 4.0))
+    stale = paths.map_dir("gfs", "t2m", "europe", CMP) / "2023.nc"
+    stale.parent.mkdir(parents=True)
+    stale.write_bytes(b"old")
+    pair()
+    tables.build_map_tables(0.25)
+    assert not stale.exists()

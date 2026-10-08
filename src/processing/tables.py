@@ -5,7 +5,9 @@
   data/dashboard/maps/{model}/{variable}/{domain}/{YYYY}.nc   yearly grid sums at native resolution
 
 Each table has a ``comparison`` key: "" for a model's own (standalone) statistics, or
-a name like "gfs_vs_ecmwf" for the paired-run statistics (maps: maps/compare/{name}/…).
+a name like "gfs_vs_ecmwf" for the paired-run statistics. Paired maps (maps/compare/{name}/…)
+are written only for years whose paired runs differ from the model's standalone runs;
+otherwise the standalone map is the paired one (paths.resolve_map_file).
 
 Builders read only completed months (aggregate and region file both present), so they
 are safe to run while the pipeline is still writing later months.
@@ -194,12 +196,27 @@ def build_map_tables(resolution: float) -> list:
     for f in _complete_months():
         model, variable, domain = f.parts[-4], f.parts[-3], f.parts[-2]
         by_year[("", model, variable, domain, f.stem[:4])].append(f)
-    for comparison, variable, domain, model, _, month, src in _paired_months():
-        by_year[(comparison, model, variable, domain, month[:4])].append(
-            month_paths(model, variable, domain, month, src)[0])
+    dropped_runs: set[tuple] = set()          # paired years where this model lost runs to the pairing
+    for comparison, variable, domain, model, rec, month, src in _paired_months():
+        key = (comparison, model, variable, domain, month[:4])
+        by_year[key].append(month_paths(model, variable, domain, month, src)[0])
+        if rec["n_runs"][model] != rec["n_paired"]:
+            dropped_runs.add(key)
+
+    def same_as_standalone(key: tuple) -> bool:
+        """A year's paired map equals the standalone one when every standalone month of
+        that year is paired and none lost a run (paired runs are a subset of the
+        standalone ones, so equal counts mean equal sets)."""
+        comparison, *rest = key
+        return bool(comparison) and key not in dropped_runs and len(by_year[key]) == len(by_year[("", *rest)])
 
     written = []
     for (comparison, model, variable, domain, year), files in sorted(by_year.items()):
+        out_dir = paths.map_dir(model, variable, domain, comparison or None)
+        out = out_dir / f"{year}.nc"
+        if same_as_standalone((comparison, model, variable, domain, year)):
+            out.unlink(missing_ok=True)                 # stale paired map from an earlier build
+            continue
         parts = []
         n_runs = 0
         for f in files:
@@ -214,11 +231,10 @@ def build_map_tables(resolution: float) -> list:
             )
         total = map_stats(combine_stats(parts)).astype("float32")
         total.attrs = dict(model=model, variable=variable, domain=domain, year=int(year),
-                           n_months=len(files), n_runs_included=n_runs, resolution=native,
-                           comparison=comparison)
-        out_dir = paths.map_dir(model, variable, domain, comparison or None)
+                           n_months=len(files), n_runs_included=n_runs, resolution=native)
+        if comparison:
+            total.attrs["comparison"] = comparison
         out_dir.mkdir(parents=True, exist_ok=True)
-        out = out_dir / f"{year}.nc"
         tmp = out.with_suffix(".nc.part")
         total.to_netcdf(tmp, encoding={
             v: {"zlib": True, "complevel": 4, "shuffle": True} for v in total.data_vars
