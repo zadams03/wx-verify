@@ -23,7 +23,6 @@ from src.data.era5_fetcher import ERA5Fetcher, required_hours
 from src.data.gfs_fetcher import GFSFetcher
 from src.processing.aggregate import aggregate_month, is_month_done, write_aggregate
 from src.processing.climatology import build_climatology, load_climatology, save_climatology
-from src.processing.tables import build_coverage_table, build_map_tables, build_region_table
 from src.utils import paths
 from src.utils.config import Config, load_config
 
@@ -142,10 +141,14 @@ def _setup_logging() -> None:
     for handler in (logging.FileHandler(log_dir / "pipeline.log"), logging.StreamHandler(sys.stdout)):
         handler.setFormatter(fmt)
         root.addHandler(handler)
-    logging.getLogger("cdsapi").setLevel(logging.WARNING)   # per-poll status lines are noise
+    for noisy in ("cdsapi", "ecmwf.datastores"):    # per-poll status lines are noise
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
 def _rebuild_tables(cfg: Config) -> None:
+    # Imported here so a long-running pipeline rebuilds with the table code on disk
+    # when it finishes, not the version it was started with.
+    from src.processing.tables import build_coverage_table, build_map_tables, build_region_table
     try:
         build_region_table()
         build_coverage_table()
@@ -153,6 +156,8 @@ def _rebuild_tables(cfg: Config) -> None:
         logger.info("Dashboard tables rebuilt in %s", paths.dashboard_dir())
     except FileNotFoundError:
         logger.info("No aggregates yet — dashboard tables not built")
+    except Exception:
+        logger.exception("Dashboard table rebuild FAILED — rerun the pipeline command to rebuild")
 
 
 def _raise_interrupt(signum, frame) -> None:

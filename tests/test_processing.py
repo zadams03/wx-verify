@@ -9,7 +9,9 @@ import xarray as xr
 from src.data.gfs_fetcher import find_byte_range
 from src.data.registry import get_variable
 from src.processing.aggregate import aggregate_month, is_month_done, validate_aggregate, write_aggregate
+from src.processing import tables
 from src.processing.alignment import align, homogeneous_runs, validate_aligned
+from src.processing.metrics import MAP_STAT_VARS, STAT_VARS, bias, map_metrics, rmse
 from src.processing.climatology import build_climatology, compute_anomaly
 from src.utils import paths
 from src.utils.config import Bounds
@@ -228,3 +230,71 @@ class TestAggregate:
         with pytest.raises(ValueError):
             write_aggregate(agg, IDENT)
         assert not is_month_done("gfs", "t2m", "europe", "2023-01")
+
+
+# ---------------------------------------------------------------------------
+# Map tables (native resolution, reduced statistics)
+# ---------------------------------------------------------------------------
+
+def _write_month(month: str, value: float, root, with_regions: bool = True):
+    ident = {**IDENT, "month": month}
+    agg = aggregate_month(_forecast(INITS, value), _era5(ERA5_TIMES, 1.0), _clim(), REGIONS, ident)
+    nc, pq = write_aggregate(agg, ident)
+    if not with_regions:
+        pq.unlink()
+    return agg
+
+
+class TestMapTables:
+    def test_map_stats_keeps_only_needed_variables_and_per_lead_n(self):
+        agg = aggregate_month(_forecast(INITS, 3.0), _era5(ERA5_TIMES, 1.0), _clim(), REGIONS, IDENT)
+        m = tables.map_stats(agg.stats)
+        assert set(m.data_vars) == set(MAP_STAT_VARS)
+        assert "sum_fa" not in m and "sum_oa" not in m
+        assert m["n"].dims == ("lead_time",)
+        assert (m["n"].values == 3).all()
+
+    def test_map_stats_keeps_gridded_n_when_not_constant(self):
+        agg = aggregate_month(_forecast(INITS, 3.0), _era5(ERA5_TIMES, 1.0), _clim(), REGIONS, IDENT)
+        stats = agg.stats.copy(deep=True)
+        stats["n"].values[0, 0, 0] = 2
+        assert tables.map_stats(stats)["n"].dims == ("lead_time", "latitude", "longitude")
+
+    def test_grid_spacing(self):
+        agg = aggregate_month(_forecast(INITS), _era5(ERA5_TIMES), _clim(), REGIONS, IDENT)
+        assert tables.grid_spacing(agg.stats) == pytest.approx(0.25)
+
+    def test_yearly_map_equals_sum_of_months(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(paths, "DATA_ROOT", tmp_path)
+        a = _write_month("2023-01", 3.0, tmp_path)
+        b = _write_month("2023-02", 5.0, tmp_path)
+        (out,) = tables.build_map_tables(0.25)
+        assert out == paths.map_dir("gfs", "t2m", "europe") / "2023.nc"
+        with xr.open_dataset(out) as ds:
+            assert set(ds.data_vars) == set(MAP_STAT_VARS)
+            assert ds["sum_e"].dtype == np.float32
+            assert ds.attrs["n_months"] == 2 and ds.attrs["n_runs_included"] == 6
+            year = ds.load().astype("float64")
+        full = a.stats + b.stats                       # exact sums over the two months
+        assert np.allclose(bias(year).values, bias(full).values, atol=1e-6)
+        assert np.allclose(rmse(year).values, rmse(full).values, atol=1e-6)
+        assert set(map_metrics(year)) == {"bias", "rmse", "acc"}
+
+    def test_incomplete_month_is_ignored(self, tmp_path, monkeypatch):
+        """A month whose region file is not there yet (job still writing) is skipped."""
+        monkeypatch.setattr(paths, "DATA_ROOT", tmp_path)
+        _write_month("2023-01", 3.0, tmp_path)
+        _write_month("2023-02", 5.0, tmp_path, with_regions=False)
+        tables.build_map_tables(0.25)
+        region = tables.build_region_table()
+        cov = tables.build_coverage_table()
+        assert list(region["month"].unique()) == ["2023-01"]
+        assert list(cov["month"]) == ["2023-01"]
+        with xr.open_dataset(paths.map_dir("gfs", "t2m", "europe") / "2023.nc") as ds:
+            assert ds.attrs["n_months"] == 1
+
+    def test_resolution_must_match_native_grid(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(paths, "DATA_ROOT", tmp_path)
+        _write_month("2023-01", 3.0, tmp_path)
+        with pytest.raises(ValueError, match="native resolution"):
+            tables.build_map_tables(0.5)

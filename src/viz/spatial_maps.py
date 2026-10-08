@@ -32,7 +32,7 @@ _TITLES = {"rmse": "RMSE", "bias": "Bias", "acc": "ACC Skill"}
 _TICK_FMT = {"rmse": ".2f", "bias": ".2f", "acc": ".2f"}
 
 _GEO_DEFAULTS = dict(
-    scope="europe",
+    scope="world",
     resolution=50,
     showcountries=True,
     countrycolor="rgba(80,80,80,0.6)",
@@ -44,9 +44,30 @@ _GEO_DEFAULTS = dict(
     coastlinecolor="rgba(80,80,80,0.5)",
     showframe=False,
     projection_type="natural earth",
-    lataxis_range=[30, 72],
-    lonaxis_range=[-20, 32],
 )
+
+# Approximate drawing area in pixels, used to size markers so grid cells tile the view.
+_MAP_W_PX, _MAP_H_PX = 480, 380
+_MARGIN_FRAC, _MIN_MARGIN_DEG = 0.10, 1.0
+
+
+def zoom_bounds(bounds: dict) -> dict:
+    """Region bounds plus a small margin (10 % of each span, at least 1°)."""
+    dlat = max(_MIN_MARGIN_DEG, _MARGIN_FRAC * (bounds["lat_max"] - bounds["lat_min"]))
+    dlon = max(_MIN_MARGIN_DEG, _MARGIN_FRAC * (bounds["lon_max"] - bounds["lon_min"]))
+    return {
+        "lat_min": bounds["lat_min"] - dlat, "lat_max": bounds["lat_max"] + dlat,
+        "lon_min": bounds["lon_min"] - dlon, "lon_max": bounds["lon_max"] + dlon,
+    }
+
+
+def _marker_size(view: dict, cell_deg: float) -> float:
+    """Marker edge in px so neighbouring cells just touch at the current zoom."""
+    px_per_deg = min(
+        _MAP_W_PX / (view["lon_max"] - view["lon_min"]),
+        _MAP_H_PX / (view["lat_max"] - view["lat_min"]),
+    )
+    return float(np.clip(px_per_deg * cell_deg * 1.1, 2.0, 20.0))
 
 
 def _rect_path(
@@ -94,12 +115,15 @@ def build_spatial_map(
     region_bounds: dict,
     region_name: str,
     units: str = "°C",
+    view_bounds: dict | None = None,
 ) -> go.Figure:
     """Plotly geographic scatter map of a single metric at a single lead time.
 
     metric_da: DataArray with dims (lead_time, latitude, longitude).
     metric_name: 'rmse', 'bias', or 'acc' (temporal ACC at each grid cell).
     units: display units for rmse and bias.
+    view_bounds: lat/lon extent to show (a zoomed region or the whole domain). Only cells
+      inside it are drawn. Defaults to the extent of the data.
     region_bounds: dict with lat_min, lat_max, lon_min, lon_max — highlighted on map.
     """
     da = metric_da.sel(lead_time=lead_time_h, method="nearest")
@@ -107,7 +131,15 @@ def build_spatial_map(
     lats, lons = np.meshgrid(da.latitude.values, da.longitude.values, indexing="ij")
     vals = da.values
 
-    mask = ~np.isnan(vals)
+    if view_bounds is None:
+        view_bounds = {"lat_min": float(da.latitude.min()), "lat_max": float(da.latitude.max()),
+                       "lon_min": float(da.longitude.min()), "lon_max": float(da.longitude.max())}
+    mask = (
+        ~np.isnan(vals)
+        & (lats >= view_bounds["lat_min"]) & (lats <= view_bounds["lat_max"])
+        & (lons >= view_bounds["lon_min"]) & (lons <= view_bounds["lon_max"])
+    )
+    cell_deg = abs(float(da.latitude.values[1] - da.latitude.values[0]))
     lats_f = lats[mask]
     lons_f = lons[mask]
     vals_f = vals[mask]
@@ -123,7 +155,7 @@ def build_spatial_map(
 
     fig = go.Figure()
 
-    # Data scatter — one marker per 0.25° grid cell
+    # Data scatter — one marker per grid cell (native 0.25°)
     fig.add_trace(go.Scattergeo(
         lat=lats_f,
         lon=lons_f,
@@ -133,8 +165,9 @@ def build_spatial_map(
             colorscale=colorscale,
             cmin=cmin,
             cmax=cmax,
-            size=5,
-            opacity=0.9,
+            size=_marker_size(view_bounds, cell_deg),
+            symbol="square",
+            opacity=0.95,
             colorbar=dict(
                 title=dict(text=colorbar_label, side="top"),
                 thickness=16,
@@ -168,7 +201,11 @@ def build_spatial_map(
         hoverinfo="skip",
     ))
 
-    fig.update_geos(**_GEO_DEFAULTS)
+    fig.update_geos(
+        **_GEO_DEFAULTS,
+        lataxis_range=[view_bounds["lat_min"], view_bounds["lat_max"]],
+        lonaxis_range=[view_bounds["lon_min"], view_bounds["lon_max"]],
+    )
 
     fig.update_layout(
         title=dict(

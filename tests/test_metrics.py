@@ -19,7 +19,6 @@ from src.processing.metrics import (
     rmse,
     sufficient_stats,
 )
-from src.processing.tables import coarsen_stats
 from src.utils.config import Bounds
 
 
@@ -249,27 +248,3 @@ class TestRegion:
         w = xr.ones_like(region_weights(fa.latitude, fa.longitude, Bounds(-1, 2, -1, 1)))
         m = region_metrics(region_stats(fa, oa, fa, oa, w))
         assert m["acc"].item() == pytest.approx(1.0)
-
-
-# ---------------------------------------------------------------------------
-# Map coarsening
-# ---------------------------------------------------------------------------
-
-class TestCoarsen:
-    def test_sums_preserved_and_cells(self):
-        lats = [35.0, 35.25, 35.5, 35.75, 36.0]
-        lons = [0.0, 0.25, 0.5]
-        rng = np.random.default_rng(3)
-        s = xr.Dataset(
-            {"n": (("lead_time", "latitude", "longitude"), np.ones((1, 5, 3))),
-             "sum_e": (("lead_time", "latitude", "longitude"), rng.standard_normal((1, 5, 3)))},
-            coords={"lead_time": [24], "latitude": lats, "longitude": lons},
-        )
-        c = coarsen_stats(s, 0.5)
-        assert c["n"].dims == ("lead_time", "latitude", "longitude")
-        assert list(c.latitude.values) == [35.0, 35.5, 36.0]
-        assert list(c.longitude.values) == [0.0, 0.5]
-        assert float(c["sum_e"].sum()) == pytest.approx(float(s["sum_e"].sum()))
-        # centre cell (35.5, 0.5) gathers lat {35.25, 35.5} × lon {0.25, 0.5}
-        assert c["n"].sel(latitude=35.5, longitude=0.5).item() == 4
-        assert c["n"].sel(latitude=35.0, longitude=0.0).item() == 1

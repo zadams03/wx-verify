@@ -12,6 +12,7 @@ __all__ = [
     "render_lead_time_selector",
     "render_region_selector",
     "render_map_toggle",
+    "render_map_view_toggle",
     "render_month_range_selector",
 ]
 
@@ -173,6 +174,12 @@ def render_map_toggle(key: str = "map_metric") -> str:
         key=key,
     )
     return labels[selected]
+
+
+def render_map_view_toggle(key: str = "map_full_domain") -> bool:
+    """True when the map should show the whole domain instead of zooming to the region."""
+    return st.toggle("Show full domain on map", value=False, key=key,
+                     help="Off: the map zooms to the selected region. On: whole domain with the region boxed.")
 
 
 def render_month_range_selector(months: list[str], key: str = "month_range") -> tuple[str, str]:

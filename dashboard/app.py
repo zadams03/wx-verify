@@ -27,11 +27,12 @@ from src.viz.components import (
     inject_card_styles,
     render_lead_time_selector,
     render_map_toggle,
+    render_map_view_toggle,
     render_metric_cards,
     render_month_range_selector,
 )
 from src.viz.skill_curves import build_skill_curves
-from src.viz.spatial_maps import build_spatial_map
+from src.viz.spatial_maps import build_spatial_map, zoom_bounds
 
 _ERA5T_WINDOW_DAYS = 100   # ERA5 is preliminary (ERA5T) for roughly the latest 3 months
 
@@ -123,6 +124,7 @@ with st.sidebar:
 
     st.divider()
     map_metric = render_map_toggle()
+    full_domain = render_map_view_toggle()
     st.divider()
 
     months = sorted(table.loc[sel, "month"].unique())
@@ -190,16 +192,20 @@ with col_right:
         st.info("Spatial map data not available for this period.")
     else:
         da = map_metrics(stats)[map_metric]
-        st.plotly_chart(build_spatial_map(da, map_metric, lead_time_h, region_bounds, region_name, units),
-                        width="stretch")
+        d = cfg.domains[domain].bounds
+        view = ({"lat_min": d.lat_min, "lat_max": d.lat_max, "lon_min": d.lon_min, "lon_max": d.lon_max}
+                if full_domain else zoom_bounds(region_bounds))
+        st.plotly_chart(
+            build_spatial_map(da, map_metric, lead_time_h, region_bounds, region_name, units, view),
+            width="stretch",
+        )
         year_months = {m for m in months if int(m[:4]) in years}
         span = f"{years[0]}" if len(years) == 1 else f"{years[0]}–{years[-1]}"
         if year_months != set(window):
             st.caption(f"Maps use whole calendar years ({span}); the curves and cards use your selected months.")
         else:
-            st.caption(f"Map shows {span}, 0.5° cells.")
-        st.caption("Map ACC is the temporal correlation of anomalies at each cell, pooled over its four "
-                   "0.25° points.")
+            st.caption(f"Map shows {span}, 0.25° cells.")
+        st.caption("Map ACC is the temporal correlation of anomalies at each grid cell.")
 
 # ---------------------------------------------------------------------------
 # Notes
