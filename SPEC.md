@@ -50,12 +50,14 @@ This project is explicitly a learning exercise in parallel with a portfolio deli
 | Mean sea level pressure | `msl` | hPa | GFS, ECMWF | Bias, RMSE, ACC | 10 |
 | 500 hPa geopotential height | `z500` | m | GFS, ECMWF | Bias, RMSE, ACC | 10 |
 | 10m wind speed | `ws10` | m/s | GFS, ECMWF | Bias, RMSE, ACC | 10 |
-| Freezing level (0°C isotherm height) | `frzl` | m above sea level | GFS only | Bias, RMSE, ACC | 10 |
+| Freezing level (0°C isotherm height) | `frzl` | m above sea level | GFS only | Bias, RMSE (no ACC — see note) | 10 |
 | 24h total precipitation | `tp24` | mm | GFS, ECMWF | Frequency bias, ETS, mean bias | 11 |
 | Snow depth water equivalent | `swe` | mm | GFS, ECMWF | Bias, RMSE (stretch) | 11 |
 
 - Wind speed is computed from u/v components *before* verification (verify the scalar, not the vector).
 - ECMWF open data has no freezing-level field; deriving it from coarse pressure levels is not worth the error it introduces.
+- Freezing level is verified only where ERA5 places the 0°C level above the surface (points where the surface itself is below 0°C are excluded per forecast and counted). Because that mask makes the sample vary by point and time, freezing level gets bias and RMSE only, not ACC.
+- The ws10 climatology must be the mean of wind *speed*, not the speed of the mean wind vector.
 
 ### 3.2 Models
 | Model | Source | Period | Notes |
@@ -211,7 +213,7 @@ variables:
   msl:  {long_name: "Mean sea level pressure", units: "hPa", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: false}
   z500: {long_name: "500 hPa geopotential height", units: "m", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: false}
   ws10: {long_name: "10m wind speed", units: "m/s", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: false}
-  frzl: {long_name: "Freezing level", units: "m", scores: [bias, rmse, acc], models: [gfs], enabled: false}
+  frzl: {long_name: "Freezing level", units: "m", scores: [bias, rmse], models: [gfs], enabled: false}
   tp24: {long_name: "24h precipitation", units: "mm", scores: [freq_bias, ets, bias], thresholds: [1, 5, 10], models: [gfs, ecmwf], enabled: false}
   swe:  {long_name: "Snow water equivalent", units: "mm", scores: [bias, rmse], models: [gfs, ecmwf], enabled: false}
 
@@ -258,7 +260,7 @@ Goal: least disk space, exact metrics for any date window, and a small committed
 2. **Monthly aggregates** (`data/processed/aggregates/{model}/{variable}/{domain}/{YYYY-MM}.nc`, gitignored): per grid point and lead time, the sufficient statistics — count, Σe, Σe², Σf′, Σo′, Σf′², Σo′², Σf′o′ (e = forecast − ERA5, ′ = anomaly vs climatology); for precipitation, contingency counts (hits, misses, false alarms, correct negatives) per threshold. Any date window's grid-point bias/RMSE/temporal ACC is an exact sum over months.
 3. **Region tables** (`data/dashboard/region_monthly.parquet`, committed): per model × variable × region × lead time × month — area-weighted pooled sums for bias/RMSE, the sum and count of per-forecast spatial ACC, and pooled contingency counts. Skill curves and metric cards are exact for any month window.
 4. **Map tables** (`data/dashboard/maps/…`, committed): grid-point statistics summed per **year** at native 0.25°, float32 + zlib, storing only what the maps need (n, Σe, Σe², Σf′², Σo′², Σf′o′ — n may be stored per lead time if constant). Maps for a selected window use the whole years it covers; the dashboard states this. Resolution is never reduced to meet the budget; map files move to cloud hosting instead. Paired (comparison) map files are written only for years whose paired run set differs from the standalone one; otherwise the dashboard reads the standalone file.
-5. **Size budget:** committed `data/dashboard/` ≤ 150 MB (config). Each phase reports actual size. If exceeded, fall back to cloud hosting (Section 7).
+5. **Size budget and hosting:** committed `data/` ≤ 150 MB. From Phase 10, **map files are hosted as assets on a GitHub Release** (a data release tagged `maps-YYYYMMDD`, independent of code tags), not in git. A committed manifest (`data/dashboard/maps_manifest.json`: release tag, file list, sizes, SHA-256) tells the dashboard what to fetch; it downloads each map file on first use and caches it, using local files when present. Region and coverage tables stay in git.
 
 Consequences:
 - Adding a **region** to an existing domain needs that domain re-aggregated (re-fetch if raw was deleted). GFS byte-range fetches make this cheap; ECMWF cost checked in Phase 9.
@@ -445,17 +447,20 @@ Build steps:
 ---
 
 ### Phase 10 — Continuous Variables & North America (v1.7)
-*Goal: MSLP, Z500, wind speed, freezing level; `north_america_west` domain; mountain region presets.*
+*Goal: MSLP, Z500, 10m wind speed and freezing level for GFS (and ECMWF where available); `north_america_west` domain for all variables; map files moved to GitHub Release hosting. Run as one unattended session (rules in the session prompt).*
 
-**Learning checkpoint before starting:** Why Z500 ACC is the headline operational skill measure; MSLP reduction over high terrain; wind speed verification pitfalls (scalar vs vector, terrain and surface roughness); how freezing level is defined in GFS vs ERA5 and the above-ground vs above-sea-level distinction; terrain mismatch between model and reanalysis grids.
+**Learning checkpoint before starting:** Why Z500 ACC is the headline operational skill measure; MSLP reduction to sea level over high terrain; wind speed verification pitfalls (scalar vs vector, terrain and surface roughness, mean of speed vs speed of mean); how freezing level is defined in GFS vs ERA5 and the above-ground vs above-sea-level distinction; why masking the sample rules out ACC; terrain mismatch between model and reanalysis grids.
 
 Build steps:
-68. Kickoff checks (report before building): projected committed data size for all Phase 10–12 combinations and a recommended hosting option for map files if over budget (issue 010); GRIB/CDS names and units for every variable in every source; freezing-level height reference in GFS (`HGT` at 0°C isotherm) vs ERA5 (`deg0l`, height above surface) — convert to a common reference (above sea level using ERA5 orography) and mask where the freezing level is at the surface.
-69. Pipeline processes all enabled models for a (variable, domain, month) in one pass, so ERA5 is fetched once per month and paired statistics come out directly. Registry entries for `msl`, `z500`, `ws10`, `frzl`; enable in config. No new code paths beyond derived variables (`ws10`) and the freezing-level conversion.
-70. Enable `north_america_west` and the new region presets (3.4).
-71. Run all enabled combinations. Report committed size vs budget.
-72. Dashboard: variable selector, per-variable units/colour scales; extend the mountain-region terrain caveat (55b) to freezing level and wind.
-73. Audit, commit: "Phase 10 complete — variables and North America".
+68. Kickoff checks (recorded in the final report, stop only if a scope rule in the session prompt triggers): source field names and units for every variable in GFS (.idx), ECMWF (index) and ERA5 (CDS single and pressure levels, hourly and monthly-by-hour); ERA5 climatology availability for each variable (including a mean-wind-speed product for ws10 and pressure-level by-hour means for z500); freezing-level conventions (GFS `HGT` at 0°C isotherm vs ERA5 `deg0l`), behaviour when the surface is below 0°C, and the ERA5 orography field; CDS request limits.
+69. Joint processing: the pipeline processes all enabled models for a (variable, domain, month) in one pass, so ERA5 is fetched once and paired statistics come out directly. ERA5 variables for a domain-month are batched into as few CDS requests as possible (single levels together; pressure levels together), with a small number of concurrent requests within CDS limits. Existing t2m europe aggregates are reused, not recomputed.
+70. Registry entries for `msl` (hPa), `z500` (m), `ws10` (m/s, derived from u/v before verification), `frzl` (m above sea level; ERA5 converted using ERA5 orography; ERA5-at-surface points masked and counted). Enable in config. Climatologies per 3.3 (ws10: mean of speed).
+71. Enable `north_america_west` and its region presets (3.4).
+72. Map hosting (4.4 item 5): map files gitignored and removed from tracking; manifest builder; dashboard loads maps from local files or the release with caching; a script `scripts/publish_maps.sh` that creates the data release and uploads assets with `gh` (run by Zac, not by Claude Code).
+73. Runs, in order: europe (msl, z500, ws10, frzl; both models where available), then north_america_west (all five variables). Resumable; failures logged and retried at the end.
+74. Dashboard: variable selector with per-variable units and colour scales; freezing level shows bias and RMSE only; domain selector (europe / north_america_west); terrain caveat extended to MSLP, wind and freezing level; comparison mode for every variable both models provide.
+75. Sanity checks: per variable, skill decreases with lead; Z500 24h ACC near 1 and the slowest-decaying ACC of all variables; MSLP and Z500 RMSE magnitudes plausible; freezing-level masked fraction reported; independent hand check of one variable/region/month.
+76. Audit, dead code removal, commit "Phase 10 complete — variables and North America".
 
 ---
 
@@ -465,11 +470,11 @@ Build steps:
 **Learning checkpoint before starting:** Why RMSE is a poor score for precipitation (skewed, intermittent); contingency tables, frequency bias, ETS; how GFS and ECMWF store accumulated precipitation (GFS bucket resets vs ECMWF accumulation from initialisation); ERA5 precipitation and snow quality in mountains.
 
 Build steps:
-74. Kickoff checks: accumulation conventions per source; SWE field names/units (known from Phase 9: ECMWF open data has `sd` only from 2025-11-20, so ECMWF SWE is expected to be parked; GFS-only SWE is the fallback) (GFS `WEASD` kg m⁻², ECMWF/ERA5 `sd` m water equivalent) and availability across the whole record. If SWE is not consistently available, park it (Outstanding Issues) — do not force it.
-75. `tp24` derivation per source (24h window ending at each lead time); contingency-count aggregation; frequency bias and ETS.
-76. Dashboard: threshold selector; precipitation views show frequency bias and ETS instead of RMSE/ACC.
-77. `swe` (stretch) as a continuous variable.
-78. Audit, commit: "Phase 11 complete — precipitation and snow".
+77. Kickoff checks: accumulation conventions per source; SWE field names/units (known from Phase 9: ECMWF open data has `sd` only from 2025-11-20, so ECMWF SWE is expected to be parked; GFS-only SWE is the fallback) (GFS `WEASD` kg m⁻², ECMWF/ERA5 `sd` m water equivalent) and availability across the whole record. If SWE is not consistently available, park it (Outstanding Issues) — do not force it.
+78. `tp24` derivation per source (24h window ending at each lead time); contingency-count aggregation; frequency bias and ETS.
+79. Dashboard: threshold selector; precipitation views show frequency bias and ETS instead of RMSE/ACC.
+80. `swe` (stretch) as a continuous variable.
+81. Audit, commit: "Phase 11 complete — precipitation and snow".
 
 ---
 
@@ -479,10 +484,10 @@ Build steps:
 **Learning checkpoint before starting:** GFS history 2015–2021 (spectral core → FV3 in v15, v16 changes); why verifying every period against the same ERA5 truth makes era comparisons fair; sampling uncertainty — how much of a year-to-year skill difference is noise.
 
 Build steps:
-79. Kickoff checks (report before building): NCAR RDA `d084001` access — whether byte-range/index access or server-side subsetting is possible; if only whole files, estimate download volume and propose a reduced sample (e.g. 00z only) for Zac to approve. Confirm GFS v13/v14 dates.
-80. `gfs_ncar_fetcher.py` as a second GFS source. Enable `ncar` source; run GFS for all enabled variables and domains back to 2015-01-15 (variables limited to what the archive provides).
-81. Skill-through-time view: pick two periods (e.g. a year a decade ago vs the latest year), same model/variable/region; overlaid skill curves and a difference map; model-version markers and which versions each period covers.
-82. Final README (written with Zac — not by Claude Code), full audit. Tag `v2.0`. Commit: "Phase 12 complete — wx-verify v2.0".
+82. Kickoff checks (report before building): NCAR RDA `d084001` access — whether byte-range/index access or server-side subsetting is possible; if only whole files, estimate download volume and propose a reduced sample (e.g. 00z only) for Zac to approve. Confirm GFS v13/v14 dates.
+83. `gfs_ncar_fetcher.py` as a second GFS source. Enable `ncar` source; run GFS for all enabled variables and domains back to 2015-01-15 (variables limited to what the archive provides).
+84. Skill-through-time view: pick two periods (e.g. a year a decade ago vs the latest year), same model/variable/region; overlaid skill curves and a difference map; model-version markers and which versions each period covers.
+85. Final README (written with Zac — not by Claude Code), full audit. Tag `v2.0`. Commit: "Phase 12 complete — wx-verify v2.0".
 
 ---
 
@@ -500,7 +505,7 @@ Build steps:
 | 007 | Refinement | Date range selector recomputes from aligned_test_jan2023.nc (32 MB), so sub-period recomputation only covers January 2023 test data | Resolved — Phase 8: month-resolution window over monthly region tables; on-the-fly recompute removed (Oct 2026) |
 | 008 | Session 1 | Integration tests in test_era5_fetcher.py and test_alignment.py fail rather than skip when CDS credentials or raw data are absent | Resolved — Phase 8: tests/test_integration.py skips cleanly; v1 tests replaced (Oct 2026) |
 | 009 | Phase 8 | Data-source note: in the NOAA AWS GFS archive the `.idx` byte offsets for three T2m fields do not point at a GRIB message (the range does not start with `GRIB`; a control file from the same day decodes fine): 2022-11-29 12z +120h and +240h, and 2022-11-30 00z +240h. Retries cannot fix it. The two affected runs (2022-11-29 12z, 2022-11-30 00z) are excluded under the homogeneous-sample rule (3.7) and counted in the coverage table; 4,014 of 4,016 runs are verified. | Noted for reference — no action |
-| 010 | Phase 9 | Committed dashboard data is 35 MB for one variable and one domain (two models + paired). Projected to exceed the 150 MB budget during Phase 10 (4 more variables, second domain) and Phase 12 (6 more GFS years). | Open — decide hosting at Phase 10 kickoff (SPEC 4.4 item 5: move map files to cloud storage; never reduce resolution) |
+| 010 | Phase 9 | Committed dashboard data is 35 MB for one variable and one domain (two models + paired). Projected to exceed the 150 MB budget during Phase 10 (4 more variables, second domain) and Phase 12 (6 more GFS years). | Resolved in Phase 10 — map files moved to GitHub Release assets (4.4 item 5) |
 | 011 | Phase 9 | GFS aggregates written before Phase 9 have no run list (`{month}_runs.parquet`) for the 34 months before 2024-02 (2022-11 was re-run and has one). Pairing needs run lists only inside the common period, where they were reconstructed from counts (zero exclusions) or written by the pipeline; the coverage table shows `None` for the older months. | Noted for reference — filled if a month is re-run |
 | 012 | Phase 9 | ECMWF open-data grid: the first three runs (2024-02-01 00z and 12z, 2024-02-02 00z) have 1439 longitude columns (no 179.75°E) instead of 1440. No effect on the `europe` domain (−15°E to 35°E): all three runs were fetched and verified, and the 1439-column layout is covered by a longitude-subset test. | Noted for reference — no action |
 
