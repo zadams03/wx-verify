@@ -40,7 +40,14 @@ logger = logging.getLogger(__name__)
 _AWS_BASE = "https://noaa-gfs-bdp-pds.s3.amazonaws.com"
 MAX_WORKERS = 8
 _MAX_ATTEMPTS = 5
-_BACKOFF_S = 1.0
+_BACKOFF_S = 2.0                      # per-request retries wait 2, 4, 8, 16 s
+# Fields that still fail on transient errors (e.g. a network outage) are retried in
+# further passes after these pauses before they are counted as missing.
+RETRY_PASS_PAUSES_S = (60, 180, 420)
+
+
+class TransientFetchError(RuntimeError):
+    """A request kept failing after its retries — worth another pass later."""
 
 # The AWS archive uses the gfs.YYYYMMDD/HH/atmos/ layout from GFS v16 (2021-03-22 12z).
 _FIRST_ATMOS_DATE = date(2021, 3, 23)
@@ -93,7 +100,7 @@ def _get(session: requests.Session, url: str, headers: dict | None = None,
             last = exc
             if attempt < _MAX_ATTEMPTS - 1:
                 time.sleep(_BACKOFF_S * 2 ** attempt)
-    raise RuntimeError(f"{url} failed after {_MAX_ATTEMPTS} attempts: {last}")
+    raise TransientFetchError(f"{url} failed after {_MAX_ATTEMPTS} attempts: {last}")
 
 
 def _download_field(session: requests.Session, init_date: date, run_hour: int,
@@ -102,7 +109,11 @@ def _download_field(session: requests.Session, init_date: date, run_hour: int,
     idx = _get(session, idx_url, timeout=30).text
     start, end = find_byte_range(idx, field, lead_h)
     rng = f"bytes={start}-{end}" if end is not None else f"bytes={start}-"
-    return _get(session, grib_url, headers={"Range": rng}).content
+    content = _get(session, grib_url, headers={"Range": rng}).content
+    if content[:4] != b"GRIB":
+        # Seen in the archive: an .idx whose offsets do not match the GRIB file.
+        raise ValueError(f"{grib_url} bytes {rng} do not start a GRIB message — .idx inconsistent with file")
+    return content
 
 
 def _normalize_longitudes(da: xr.DataArray) -> xr.DataArray:
@@ -175,44 +186,47 @@ class GFSFetcher(BaseFetcher):
         tmp_dir.mkdir(exist_ok=True)
 
         session = requests.Session()
-        adapter = requests.adapters.HTTPAdapter(pool_maxsize=MAX_WORKERS)
-        session.mount("https://", adapter)
+        session.mount("https://", requests.adapters.HTTPAdapter(pool_maxsize=MAX_WORKERS))
 
         init_times = [np.datetime64(datetime(d.year, d.month, d.day, r)) for d in dates for r in runs]
         init_index = {t: i for i, t in enumerate(init_times)}
-        data = None
         present = np.zeros((len(init_times), len(leads)), dtype="int8")
-        coords = None
-        n_failed = 0
+        store: dict = {"data": None, "coords": None}
 
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-            futures = {
-                pool.submit(_download_field, session, d, r, h, field): (d, r, h)
-                for d, r, h in jobs
-            }
-            # Download concurrently; decode one message at a time (ecCodes is not
-            # guaranteed thread-safe) on this thread.
-            for fut in as_completed(futures):
-                d, r, h = futures[fut]
-                try:
-                    content = fut.result()
-                    with tempfile.NamedTemporaryFile(dir=tmp_dir, suffix=".grib2", delete=False) as tf:
-                        tf.write(content)
-                    try:
-                        da = decode_field(Path(tf.name), field, bounds)
-                    finally:
-                        os.unlink(tf.name)
-                except Exception as exc:
-                    n_failed += 1
-                    logger.warning("Missing GFS %s %02dz +%03dh: %s", d, r, h, exc)
-                    continue
-                if data is None:
-                    coords = (da.latitude.values, da.longitude.values)
-                    data = np.full((len(init_times), len(leads)) + da.shape, np.nan, dtype="float32")
-                i = init_index[np.datetime64(datetime(d.year, d.month, d.day, r))]
-                j = leads.index(h)
-                data[i, j] = da.values
-                present[i, j] = 1
+        def sink(job, da: xr.DataArray) -> None:
+            d, r, h = job
+            if store["data"] is None:
+                store["coords"] = (da.latitude.values, da.longitude.values)
+                store["data"] = np.full((len(init_times), len(leads)) + da.shape, np.nan, dtype="float32")
+            i = init_index[np.datetime64(datetime(d.year, d.month, d.day, r))]
+            j = leads.index(h)
+            store["data"][i, j] = da.values
+            present[i, j] = 1
+
+        pending = jobs
+        failures: dict = {}          # every job still failing, across passes
+        for n_pass in range(len(RETRY_PASS_PAUSES_S) + 1):
+            if n_pass:
+                pending = [j for j, exc in failures.items() if isinstance(exc, TransientFetchError)]
+                if not pending:
+                    break
+                pause = RETRY_PASS_PAUSES_S[n_pass - 1]
+                logger.warning("%d GFS fields failed on transient errors — retry pass %d in %ds",
+                               len(pending), n_pass, pause)
+                time.sleep(pause)
+            still_failing = self._download_pass(session, pending, field, bounds, tmp_dir, sink)
+            for job in pending:
+                failures.pop(job, None)
+            failures.update(still_failing)
+            if n_pass:
+                logger.info("Retry pass %d recovered %d of %d fields",
+                            n_pass, len(pending) - len(still_failing), len(pending))
+            if not failures:
+                break
+        n_failed = len(failures)
+        for (d, r, h), exc in failures.items():
+            logger.warning("Missing GFS %s %02dz +%03dh: %s", d, r, h, exc)
+        data, coords = store["data"], store["coords"]
 
         if data is None:
             raise RuntimeError(f"All {len(jobs)} GFS downloads failed for {year}-{month:02d}")
@@ -236,6 +250,28 @@ class GFSFetcher(BaseFetcher):
         os.replace(part, out)
         logger.info("Saved %s (%d/%d fields)", out.name, len(jobs) - n_failed, len(jobs))
         return out
+
+    def _download_pass(self, session, jobs, field: GFSField, bounds, tmp_dir: Path, sink) -> dict:
+        """Download ``jobs`` with MAX_WORKERS threads and decode them on this thread
+        (ecCodes is not guaranteed thread-safe). Returns {job: exception} for failures."""
+        failures: dict = {}
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+            futures = {pool.submit(_download_field, session, d, r, h, field): (d, r, h) for d, r, h in jobs}
+            for fut in as_completed(futures):
+                job = futures[fut]
+                try:
+                    content = fut.result()
+                    with tempfile.NamedTemporaryFile(dir=tmp_dir, suffix=".grib2", delete=False) as tf:
+                        tf.write(content)
+                    try:
+                        da = decode_field(Path(tf.name), field, bounds)
+                    finally:
+                        os.unlink(tf.name)
+                except Exception as exc:
+                    failures[job] = exc
+                    continue
+                sink(job, da)
+        return failures
 
     def validate(self, path: Path, variable: str, domain: str) -> None:
         cfg = self.config
