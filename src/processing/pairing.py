@@ -20,18 +20,11 @@ import pandas as pd
 from src.data.byterange import ByteRangeFetcher
 from src.processing.aggregate import month_paths, runs_path
 from src.utils import paths
-from src.utils.config import Config
+from src.utils.config import Config, comparison_models  # noqa: F401  (re-exported)
 
 
 class MissingRunList(RuntimeError):
     """A month's included runs cannot be determined without re-running that month."""
-
-
-def comparison_models(comparison: str) -> tuple[str, str]:
-    models = tuple(comparison.split("_vs_"))
-    if len(models) != 2 or not all(models):
-        raise ValueError(f"Comparison '{comparison}' must be named '<model>_vs_<model>'")
-    return models  # type: ignore[return-value]
 
 
 def scheduled_runs(cfg: Config, fetcher: ByteRangeFetcher, year: int, month: int) -> pd.DatetimeIndex:

@@ -9,6 +9,9 @@ __all__ = [
     "CARD_STYLES",
     "TERRAIN_NOTE",
     "CENTRED_ACC_NOTE",
+    "ERA5_LINEAGE_NOTE",
+    "COMPARISON_MAP_VIEWS",
+    "render_comparison_map_toggle",
     "inject_card_styles",
     "render_metric_cards",
     "render_lead_time_selector",
@@ -28,6 +31,11 @@ CENTRED_ACC_NOTE = (
     "ACC is centred: each forecast's regional mean anomaly is removed before correlating. "
     "Smaller regions have less spatial anomaly variance, so their ACC is lower and reaches the "
     "0.6 line at shorter lead times than larger regions."
+)
+
+ERA5_LINEAGE_NOTE = (
+    "ERA5 is produced with the ECMWF model. Verifying ECMWF against ERA5 favours ECMWF, "
+    "so this comparison is not model-neutral."
 )
 
 # Single CSS block — injected once by inject_card_styles(), not per card.
@@ -92,11 +100,15 @@ def _card(
     )
 
 
-def render_metric_cards(summary_df: pd.DataFrame, lead_time_h: int, units: str = "°C") -> None:
+def render_metric_cards(summary_df: pd.DataFrame, lead_time_h: int, units: str = "°C",
+                        title: str | None = None) -> None:
     """Render four metric summary cards for the selected lead time.
 
     summary_df: columns lead_time_h, acc_c, rmse, bias (metrics.region_metrics).
+    title: heading above the cards (comparison mode shows one row per model).
     """
+    if title:
+        st.markdown(f"**{title}**")
     candidates = summary_df[summary_df["lead_time_h"] == lead_time_h]
     if candidates.empty:
         idx = (summary_df["lead_time_h"] - lead_time_h).abs().idxmin()
@@ -188,6 +200,20 @@ def render_map_toggle(key: str = "map_metric") -> str:
         key=key,
     )
     return labels[selected]
+
+
+# Comparison-mode map views: key -> label. {a} and {b} are the two model names.
+COMPARISON_MAP_VIEWS = {
+    "rmse_diff": "RMSE difference ({a} − {b})",
+    "bias:a": "Bias — {a}",
+    "bias:b": "Bias — {b}",
+}
+
+
+def render_comparison_map_toggle(model_a: str, model_b: str, key: str = "cmp_map_metric") -> str:
+    """Map view for a head-to-head. Returns 'rmse_diff', 'bias:a' or 'bias:b'."""
+    labels = {v.format(a=model_a.upper(), b=model_b.upper()): k for k, v in COMPARISON_MAP_VIEWS.items()}
+    return labels[st.radio("Map view", list(labels), key=key)]
 
 
 def render_map_view_toggle(key: str = "map_full_domain") -> bool:

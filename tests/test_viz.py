@@ -57,3 +57,32 @@ def test_region_box_is_drawn_in_both_views():
 def test_default_view_is_the_data_extent():
     fig = build_spatial_map(_field(), "acc", 24, REGION, "Alps")
     assert list(fig.layout.geo.lataxis.range) == [35.0, 72.0]
+
+
+def test_comparison_curves_overlay_models_in_three_panels():
+    import pandas as pd
+    from src.viz.skill_curves import build_comparison_curves
+    df = pd.DataFrame({"lead_time_h": [24, 48, 72, 120, 240], "acc_c": [.9, .8, .7, .5, .2],
+                       "rmse": [1, 1.5, 2, 3, 5], "bias": [-.1, -.1, 0, .1, .3]})
+    fig = build_comparison_curves({"gfs": df, "ecmwf": df.assign(rmse=df.rmse * .9)}, "Alps",
+                                  lead_times=[24, 48, 72, 120, 240])
+    assert len(fig.data) == 6
+    assert [t.showlegend for t in fig.data] == [True, False, False, True, False, False]   # one legend entry per model
+    assert {t.line.color for t in fig.data if t.name == "GFS"} != {t.line.color for t in fig.data if t.name == "ECMWF"}
+    assert list(fig.layout.xaxis3.tickvals) == [24, 48, 72, 120, 240]
+
+
+def test_difference_map_uses_a_symmetric_scale_and_custom_titles():
+    import numpy as np
+    import xarray as xr
+    from src.viz.spatial_maps import build_spatial_map
+    lat, lon = np.array([52.0, 51.75]), np.array([0.0, 0.25])
+    da = xr.DataArray(np.array([[[0.3, -0.1], [0.2, 0.05]]]), dims=("lead_time", "latitude", "longitude"),
+                      coords={"lead_time": [24], "latitude": lat, "longitude": lon})
+    box = {"lat_min": 51.5, "lat_max": 52.0, "lon_min": 0.0, "lon_max": 0.25}
+    fig = build_spatial_map(da, "rmse_diff", 24, box, "X", "°C", title="RMSE GFS − ECMWF",
+                            colorbar_note="+ = ECMWF more accurate")
+    m = fig.data[0].marker
+    assert m.cmin == -m.cmax and m.cmax > 0
+    assert "+ = ECMWF more accurate" in m.colorbar.title.text
+    assert fig.layout.title.text.startswith("RMSE GFS − ECMWF")

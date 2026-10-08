@@ -143,6 +143,14 @@ class Config:
         return region in self.domains[domain].mountain_regions
 
 
+def comparison_models(comparison: str) -> tuple[str, str]:
+    """Models of a head-to-head, from its name '<model>_vs_<model>' (e.g. 'gfs_vs_ecmwf')."""
+    models = tuple(comparison.split("_vs_"))
+    if len(models) != 2 or not all(models):
+        raise ValueError(f"Comparison '{comparison}' must be named '<model>_vs_<model>'")
+    return models  # type: ignore[return-value]
+
+
 # ---------------------------------------------------------------------------
 # Parsing helpers — every error names the config path it came from.
 # ---------------------------------------------------------------------------
