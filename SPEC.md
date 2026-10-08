@@ -441,7 +441,7 @@ Build steps:
 **Learning checkpoint before starting:** Why Z500 ACC is the headline operational skill measure; MSLP reduction over high terrain; wind speed verification pitfalls (scalar vs vector, terrain and surface roughness); how freezing level is defined in GFS vs ERA5 and the above-ground vs above-sea-level distinction; terrain mismatch between model and reanalysis grids.
 
 Build steps:
-68. Kickoff checks (report before building): GRIB/CDS names and units for every variable in every source; freezing-level height reference in GFS (`HGT` at 0°C isotherm) vs ERA5 (`deg0l`, height above surface) — convert to a common reference (above sea level using ERA5 orography) and mask where the freezing level is at the surface.
+68. Kickoff checks (report before building): projected committed data size for all Phase 10–12 combinations and a recommended hosting option for map files if over budget (issue 010); GRIB/CDS names and units for every variable in every source; freezing-level height reference in GFS (`HGT` at 0°C isotherm) vs ERA5 (`deg0l`, height above surface) — convert to a common reference (above sea level using ERA5 orography) and mask where the freezing level is at the surface.
 69. Pipeline processes all enabled models for a (variable, domain, month) in one pass, so ERA5 is fetched once per month and paired statistics come out directly. Registry entries for `msl`, `z500`, `ws10`, `frzl`; enable in config. No new code paths beyond derived variables (`ws10`) and the freezing-level conversion.
 70. Enable `north_america_west` and the new region presets (3.4).
 71. Run all enabled combinations. Report committed size vs budget.
@@ -491,6 +491,7 @@ Build steps:
 | 007 | Refinement | Date range selector recomputes from aligned_test_jan2023.nc (32 MB), so sub-period recomputation only covers January 2023 test data | Resolved — Phase 8: month-resolution window over monthly region tables; on-the-fly recompute removed (Oct 2026) |
 | 008 | Session 1 | Integration tests in test_era5_fetcher.py and test_alignment.py fail rather than skip when CDS credentials or raw data are absent | Resolved — Phase 8: tests/test_integration.py skips cleanly; v1 tests replaced (Oct 2026) |
 | 009 | Phase 8 | Data-source note: in the NOAA AWS GFS archive the `.idx` byte offsets for three T2m fields do not point at a GRIB message (the range does not start with `GRIB`; a control file from the same day decodes fine): 2022-11-29 12z +120h and +240h, and 2022-11-30 00z +240h. Retries cannot fix it. The two affected runs (2022-11-29 12z, 2022-11-30 00z) are excluded under the homogeneous-sample rule (3.7) and counted in the coverage table; 4,014 of 4,016 runs are verified. | Noted for reference — no action |
+| 010 | Phase 9 | Committed dashboard data is 35 MB for one variable and one domain (two models + paired). Projected to exceed the 150 MB budget during Phase 10 (4 more variables, second domain) and Phase 12 (6 more GFS years). | Open — decide hosting at Phase 10 kickoff (SPEC 4.4 item 5: move map files to cloud storage; never reduce resolution) |
 
 ---
 
