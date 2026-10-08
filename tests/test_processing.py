@@ -299,3 +299,27 @@ class TestMapTables:
         _write_month("2023-01", 3.0, tmp_path)
         with pytest.raises(ValueError, match="native resolution"):
             tables.build_map_tables(0.5)
+
+
+# ---------------------------------------------------------------------------
+# ERA5 months needed for a set of init dates
+# ---------------------------------------------------------------------------
+
+class TestEra5Months:
+    def test_full_month_spills_into_next(self):
+        from datetime import date
+        from src.pipeline import era5_months
+        inits = [date(2023, 1, d) for d in range(1, 32)]
+        assert era5_months(inits, [24, 240]) == [(2023, 1), (2023, 2)]
+
+    def test_period_end_does_not_pull_in_an_extra_month(self):
+        """Inits to 20 Sep + 240 h reach 30 Sep, so October ERA5 is not needed."""
+        from datetime import date
+        from src.pipeline import era5_months
+        inits = [date(2026, 9, d) for d in range(1, 21)]
+        assert era5_months(inits, [24, 240]) == [(2026, 9)]
+
+    def test_boundary_when_longest_lead_just_crosses_month_end(self):
+        from datetime import date
+        from src.pipeline import era5_months
+        assert era5_months([date(2026, 9, 21)], [240]) == [(2026, 9), (2026, 10)]

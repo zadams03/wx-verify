@@ -46,7 +46,8 @@ def ensure_climatology(cfg: Config, variable: str, domain: str):
 def era5_months(init_dates: list[date], lead_times: list[int]) -> list[tuple[int, int]]:
     """Calendar months holding the valid times of forecasts from ``init_dates``."""
     first = pd.Timestamp(min(init_dates))
-    last = pd.Timestamp(max(init_dates)) + pd.Timedelta(hours=24 + max(lead_times))
+    # Latest run of the last init day (up to 23z) plus the longest lead.
+    last = pd.Timestamp(max(init_dates)) + pd.Timedelta(hours=23 + max(lead_times))
     return [(p.year, p.month) for p in pd.period_range(first, last, freq="M")]
 
 
