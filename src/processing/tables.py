@@ -17,10 +17,13 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from src.processing.metrics import MAP_STAT_VARS, combine_stats
+from src.processing.metrics import combine_stats
 from src.utils import paths
 
 logger = logging.getLogger(__name__)
+
+# What the maps need (temporal ACC, bias, RMSE); Σf′ and Σo′ are not required.
+MAP_STAT_VARS = ("n", "sum_e", "sum_e2", "sum_fa2", "sum_oa2", "sum_fao")
 
 _COUNT_ATTRS = ("n_runs_total", "n_runs_included",
                 "n_excluded_forecast_missing", "n_excluded_era5_missing")

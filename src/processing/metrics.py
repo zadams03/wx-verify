@@ -15,7 +15,6 @@ import pandas as pd
 import xarray as xr
 
 STAT_VARS = ("n", "sum_e", "sum_e2", "sum_fa", "sum_oa", "sum_fa2", "sum_oa2", "sum_fao")
-MAP_STAT_VARS = ("n", "sum_e", "sum_e2", "sum_fa2", "sum_oa2", "sum_fao")   # what the maps need
 REGION_SUM_COLS = ("n_forecasts", "sum_w", "sum_we", "sum_we2",
                    "acc_sum", "acc_count", "acc_c_sum", "acc_c_count")
 

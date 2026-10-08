@@ -10,8 +10,9 @@ from src.data.gfs_fetcher import find_byte_range
 from src.data.registry import get_variable
 from src.processing.aggregate import aggregate_month, is_month_done, validate_aggregate, write_aggregate
 from src.processing import tables
+from src.processing.tables import MAP_STAT_VARS
 from src.processing.alignment import align, homogeneous_runs, validate_aligned
-from src.processing.metrics import MAP_STAT_VARS, STAT_VARS, bias, map_metrics, rmse
+from src.processing.metrics import bias, map_metrics, rmse
 from src.processing.climatology import build_climatology, compute_anomaly
 from src.utils import paths
 from src.utils.config import Bounds
