@@ -22,6 +22,8 @@ def build_climatology(raw_path: Path, variable: str) -> xr.DataArray:
     field = get_variable(variable).source_field("era5")
     with xr.open_dataset(raw_path) as ds:
         da = ds[field.short_name].load()
+    if "pressure_level" in da.dims:
+        da = da.squeeze("pressure_level", drop=True)
     vt = pd.DatetimeIndex(da.valid_time.values)
     months = sorted(set(vt.month))
     hours = sorted(set(vt.hour))

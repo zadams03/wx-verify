@@ -100,6 +100,19 @@ def decode_grib(grib_path: Path, grib_filter: dict, short_name: str, bounds) -> 
         ds.close()
 
 
+def _parts(field) -> tuple:
+    """The single-message fields behind a registry field (a speed field has two)."""
+    return getattr(field, "parts", None) or (field,)
+
+
+def _speed(u: xr.DataArray, v: xr.DataArray) -> xr.DataArray:
+    """√(u²+v²) in float64, returned as float32 on the components' grid."""
+    if not (np.array_equal(u.latitude.values, v.latitude.values)
+            and np.array_equal(u.longitude.values, v.longitude.values)):
+        raise ValueError("u and v components are on different grids")
+    return np.sqrt(u.astype("float64") ** 2 + v.astype("float64") ** 2).astype("float32")
+
+
 class ByteRangeFetcher(BaseFetcher):
     """Byte-range download from a model archive, subset to the domain in memory.
 
@@ -212,22 +225,30 @@ class ByteRangeFetcher(BaseFetcher):
         logger.info("Saved %s (%d/%d fields)", out.name, len(jobs) - n_failed, len(jobs))
         return out
 
+    def _download_parts(self, session, job, field) -> list[bytes]:
+        """Download every GRIB message the field needs (two for a wind-speed field)."""
+        return [self._download(session, job, f) for f in _parts(field)]
+
+    def _decode_bytes(self, content: bytes, field, bounds, tmp_dir: Path) -> xr.DataArray:
+        with tempfile.NamedTemporaryFile(dir=tmp_dir, suffix=".grib2", delete=False) as tf:
+            tf.write(content)
+        try:
+            return self._decode(Path(tf.name), field, bounds)
+        finally:
+            os.unlink(tf.name)
+
     def _download_pass(self, session, jobs, field, bounds, tmp_dir: Path, sink) -> dict:
         """Download ``jobs`` with MAX_WORKERS threads and decode them on this thread
         (ecCodes is not guaranteed thread-safe). Returns {job: exception} for failures."""
         failures: dict = {}
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-            futures = {pool.submit(self._download, session, job, field): job for job in jobs}
+            futures = {pool.submit(self._download_parts, session, job, field): job for job in jobs}
             for fut in as_completed(futures):
                 job = futures[fut]
                 try:
-                    content = fut.result()
-                    with tempfile.NamedTemporaryFile(dir=tmp_dir, suffix=".grib2", delete=False) as tf:
-                        tf.write(content)
-                    try:
-                        da = self._decode(Path(tf.name), field, bounds)
-                    finally:
-                        os.unlink(tf.name)
+                    parts = [self._decode_bytes(c, f, bounds, tmp_dir)
+                             for c, f in zip(fut.result(), _parts(field))]
+                    da = parts[0] if len(parts) == 1 else _speed(*parts)
                 except Exception as exc:
                     failures[job] = exc
                     continue

@@ -54,23 +54,64 @@ class ECMWFField:
 
 
 @dataclass(frozen=True)
-class ERA5Field:
-    """A field in the ERA5 single-levels CDS dataset."""
+class SpeedField:
+    """Wind speed √(u²+v²) of two component fields of one forecast source.
 
-    cds_name: str
-    short_name: str
+    Speed is formed per forecast field *before* verification (SPEC 3.1: verify the
+    scalar, not the vector).
+    """
+
+    u: GFSField | ECMWFField
+    v: GFSField | ECMWFField
+    short_name: str = "ws10"
     conversion: UnitConversion = field(default_factory=UnitConversion)
+
+    @property
+    def parts(self) -> tuple[GFSField | ECMWFField, ...]:
+        return (self.u, self.v)
+
+
+GRAVITY = 9.80665      # m s⁻², converts ERA5 geopotential (m² s⁻²) to metres
+
+
+@dataclass(frozen=True)
+class ERA5Field:
+    """One verification variable in ERA5, from the single-level or a pressure-level dataset.
+
+    cds_names / short_names: the CDS variables requested and their names inside the file.
+    derive: None (first field, converted) | "speed" (√(u²+v²) of the two fields) |
+    "freezing_level" (deg0l, height above ground, plus orography z/g → metres above
+    sea level; NaN where deg0l == 0, i.e. the 0°C level is at the surface).
+    climatology: "monthly" (CDS monthly-means-by-hour product), "hourly" (computed from
+    hourly fields, 1991–2020) or None (no anomalies needed — variable has no ACC).
+    """
+
+    cds_names: tuple[str, ...]
+    short_names: tuple[str, ...]
+    conversion: UnitConversion = field(default_factory=UnitConversion)
+    level: str | None = None          # pressure level (hPa) → pressure-levels dataset
+    derive: str | None = None
+    climatology: str | None = "monthly"
+
+    @property
+    def short_name(self) -> str:
+        return self.short_names[0]
 
 
 @dataclass(frozen=True)
 class VariableSpec:
     key: str
     valid_range: tuple[float, float]   # plausible values in display units
-    gfs: GFSField | None = None
-    ecmwf: ECMWFField | None = None
+    gfs: GFSField | SpeedField | None = None
+    ecmwf: ECMWFField | SpeedField | None = None
     era5: ERA5Field | None = None
 
-    def source_field(self, source: str) -> GFSField | ECMWFField | ERA5Field:
+    @property
+    def masked(self) -> bool:
+        """True when the verification sample varies by point and time (freezing level)."""
+        return self.era5 is not None and self.era5.derive == "freezing_level"
+
+    def source_field(self, source: str) -> GFSField | ECMWFField | SpeedField | ERA5Field:
         """Return the field definition for ``source`` ('gfs', 'ecmwf' or 'era5')."""
         entry = getattr(self, source, None) if source in ("gfs", "ecmwf", "era5") else None
         if entry is None:
@@ -81,6 +122,7 @@ class VariableSpec:
 
 
 _KELVIN_TO_CELSIUS = UnitConversion(offset=-273.15)
+_PA_TO_HPA = UnitConversion(scale=0.01)
 
 VARIABLES: dict[str, VariableSpec] = {
     "t2m": VariableSpec(
@@ -100,11 +142,47 @@ VARIABLES: dict[str, VariableSpec] = {
             short_name="t2m",
             conversion=_KELVIN_TO_CELSIUS,
         ),
-        era5=ERA5Field(
-            cds_name="2m_temperature",
-            short_name="t2m",
-            conversion=_KELVIN_TO_CELSIUS,
+        era5=ERA5Field(("2m_temperature",), ("t2m",), conversion=_KELVIN_TO_CELSIUS),
+    ),
+    "msl": VariableSpec(
+        key="msl",
+        valid_range=(850.0, 1090.0),
+        gfs=GFSField("PRMSL", "mean sea level", {"typeOfLevel": "meanSea"},
+                     "prmsl", conversion=_PA_TO_HPA),
+        ecmwf=ECMWFField("msl", "sfc", {"typeOfLevel": "meanSea"},
+                         "msl", conversion=_PA_TO_HPA),
+        era5=ERA5Field(("mean_sea_level_pressure",), ("msl",), conversion=_PA_TO_HPA),
+    ),
+    "z500": VariableSpec(
+        key="z500",
+        valid_range=(4500.0, 6200.0),
+        gfs=GFSField("HGT", "500 mb", {"typeOfLevel": "isobaricInhPa", "level": 500},
+                     "gh"),
+        ecmwf=ECMWFField("gh", "pl", {"typeOfLevel": "isobaricInhPa", "level": 500}, "gh",
+                         levelist="500"),
+        era5=ERA5Field(("geopotential",), ("z",), conversion=UnitConversion(scale=1 / GRAVITY),
+                       level="500"),
+    ),
+    "ws10": VariableSpec(
+        key="ws10",
+        valid_range=(0.0, 90.0),
+        gfs=SpeedField(
+            u=GFSField("UGRD", "10 m above ground", {"typeOfLevel": "heightAboveGround", "level": 10}, "u10"),
+            v=GFSField("VGRD", "10 m above ground", {"typeOfLevel": "heightAboveGround", "level": 10}, "v10"),
         ),
+        ecmwf=SpeedField(
+            u=ECMWFField("10u", "sfc", {"typeOfLevel": "heightAboveGround", "level": 10}, "u10"),
+            v=ECMWFField("10v", "sfc", {"typeOfLevel": "heightAboveGround", "level": 10}, "v10"),
+        ),
+        era5=ERA5Field(("10m_u_component_of_wind", "10m_v_component_of_wind"), ("u10", "v10"),
+                       derive="speed", climatology="hourly"),
+    ),
+    "frzl": VariableSpec(
+        key="frzl",
+        valid_range=(-1000.0, 10000.0),
+        gfs=GFSField("HGT", "0C isotherm", {"typeOfLevel": "isothermZero"}, "gh"),
+        era5=ERA5Field(("zero_degree_level", "geopotential"), ("deg0l", "z"),
+                       derive="freezing_level", climatology=None),
     ),
 }
 
