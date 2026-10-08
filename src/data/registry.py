@@ -49,6 +49,7 @@ class ERA5Field:
 @dataclass(frozen=True)
 class VariableSpec:
     key: str
+    valid_range: tuple[float, float]   # plausible values in display units
     gfs: GFSField | None = None
     era5: ERA5Field | None = None
 
@@ -67,6 +68,7 @@ _KELVIN_TO_CELSIUS = UnitConversion(offset=-273.15)
 VARIABLES: dict[str, VariableSpec] = {
     "t2m": VariableSpec(
         key="t2m",
+        valid_range=(-90.0, 60.0),
         gfs=GFSField(
             idx_name="TMP",
             idx_level="2 m above ground",

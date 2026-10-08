@@ -37,8 +37,8 @@ def test_repo_config_loads():
     assert cfg.enabled_models() == ["gfs"]
     assert cfg.enabled_variables() == ["t2m"]
     assert cfg.enabled_domains() == ["europe"]
-    assert cfg.models["gfs"].start == date(2021, 3, 22)
-    assert cfg.models["gfs"].end == date(2026, 9, 30)
+    assert cfg.models["gfs"].start == date(2021, 3, 23)
+    assert cfg.models["gfs"].end == date(2026, 9, 20)
 
 
 def test_repo_config_europe_regions():
