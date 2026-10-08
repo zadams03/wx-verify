@@ -1,13 +1,13 @@
 # wx-verify
 ## NWP Forecast Verification Dashboard
-**Technical Project Specification · Version 1.1 — Complete · October 2026**
+**Technical Project Specification · Version 1.2 — v1.1 complete, Phases 8–12 planned · October 2026**
 Personal Research Project · GitHub: github.com/zadams03/wx-verify
 
 ---
 
 ## 1. Mission Statement
 
-wx-verify is a forecast verification platform that quantifies how accurately operational numerical weather prediction (NWP) models perform over Western Europe, and how that accuracy degrades with forecast lead time. It ingests archived GFS forecasts and ERA5 reanalysis data, computes standard meteorological skill scores, and presents findings through an interactive Streamlit dashboard.
+wx-verify is a forecast verification platform that quantifies how accurately operational numerical weather prediction (NWP) models perform over Western Europe and western North America — with a focus on mountain regions — and how that accuracy degrades with forecast lead time and has changed over time. It ingests archived GFS and ECMWF forecasts and ERA5 reanalysis data, computes standard meteorological skill scores, and presents findings through an interactive Streamlit dashboard.
 
 This is simultaneously a portfolio project demonstrating scientific computing and data pipeline skills, and a genuine learning exercise in operational meteorology and forecast verification methodology.
 
@@ -41,33 +41,82 @@ This project is explicitly a learning exercise in parallel with a portfolio deli
 
 ## 3. Scientific Scope
 
-### 3.1 Primary Variable
-- **2m temperature (T2m)** — well-observed, intuitive, clean verification signal
+*v1.0 scope was T2m, GFS only, Western Europe. The v2 scope below is delivered by Phases 8–12.*
+
+### 3.1 Variables
+| Variable | Key | Units | Models | Scores | Phase |
+|---|---|---|---|---|---|
+| 2m temperature | `t2m` | °C | GFS, ECMWF | Bias, RMSE, ACC | 8 / 9 |
+| Mean sea level pressure | `msl` | hPa | GFS, ECMWF | Bias, RMSE, ACC | 10 |
+| 500 hPa geopotential height | `z500` | m | GFS, ECMWF | Bias, RMSE, ACC | 10 |
+| 10m wind speed | `ws10` | m/s | GFS, ECMWF | Bias, RMSE, ACC | 10 |
+| Freezing level (0°C isotherm height) | `frzl` | m above sea level | GFS only | Bias, RMSE, ACC | 10 |
+| 24h total precipitation | `tp24` | mm | GFS, ECMWF | Frequency bias, ETS, mean bias | 11 |
+| Snow depth water equivalent | `swe` | mm | GFS, ECMWF | Bias, RMSE (stretch) | 11 |
+
+- Wind speed is computed from u/v components *before* verification (verify the scalar, not the vector).
+- ECMWF open data has no freezing-level field; deriving it from coarse pressure levels is not worth the error it introduces.
 
 ### 3.2 Models
-- **Primary:** GFS (NOAA) — 0.25° resolution, 4 runs/day, freely archived
-- **Stretch goal:** ECMWF ERA5 forecast-range data for head-to-head comparison
+| Model | Source | Period | Notes |
+|---|---|---|---|
+| GFS | NOAA AWS S3 (`noaa-gfs-bdp-pds`) | 2021-03-22 → 2026-09-30 | Starts at GFS v16 implementation. Byte-range downloads via `.idx`. |
+| GFS (long record) | NCAR RDA `d084001` | 2015-01-15 → 2021-03-21 | Phase 12. Same 0.25° grids. Access method verified at Phase 12 kickoff. |
+| ECMWF IFS HRES | ECMWF open data, AWS mirror | 2024-02-01 → 2026-09-30 | 0.25° from 1 Feb 2024 (0.4° before — excluded). |
+
+- Runs: **00z and 12z only** (ECMWF open data only goes to 240h+ from these runs; halves volume).
+- Model upgrades within the record are recorded in config (`model_versions`) and marked on all time-based views — see 3.8.
 
 ### 3.3 Verification Dataset
-- **ERA5 reanalysis** (ECMWF via Copernicus Climate Data Store) — best available reconstruction of atmospheric truth, complete spatial coverage, 0.25° resolution
+- **ERA5 reanalysis** (ECMWF via Copernicus CDS), 0.25°. Used as truth for every model.
+- **Climatology for ACC:** ERA5 1991–2020 (WMO standard normal), by calendar month and hour of day, from the CDS *monthly averaged reanalysis by hour of day* product (small download). Replaces the v1 climatology, which was built from January 2023 only.
 
-### 3.4 Domain
-- **Western Europe** — dense observation network, personally relevant, ERA5 coverage excellent
-- Latitude: 35°N – 65°N / Longitude: 15°W – 25°E
+### 3.4 Domains and Regions
+A **domain** is a fetch/processing area. A **region** is a dashboard preset inside a domain. Adding a region is config-only; adding a domain needs new downloads for that domain only.
+
+| Domain | Lat | Lon | Regions |
+|---|---|---|---|
+| `europe` | 35–72°N | 15°W–35°E | Western Europe (v1 domain, 35–65°N 15°W–25°E), UK & Ireland, Scandinavia, Mediterranean, Central Europe, Iberian Peninsula, **European Alps** (43.5–48.5°N, 5–16.5°E), **Norwegian Mountains** (58–71°N, 5–31°E) |
+| `north_america_west` | 36–62°N | 140–102°W | **Pacific Northwest** (42–49°N, 125–116°W), **Western Canada** (49–60°N, 135–110°W), **Rockies** (37–55°N, 120–104°W) |
+| `japan` *(later)* | TBD | TBD | Config-only addition after Phase 10 |
+| `south_america` *(later)* | TBD | TBD | Config-only addition after Phase 10 |
+
+Region boxes are first-pass and to be sanity-checked by Zac before Phase 10.
 
 ### 3.5 Lead Times
-- 24h, 48h, 72h, 120h, 240h — captures short, medium, and extended range skill degradation
+- 24h, 48h, 72h, 120h, 240h. Precipitation uses the 24h accumulation window *ending* at each lead time.
+- All lead-time-dependent code (axes, ticks, gridlines, selectors) reads `lead_times_hours` from config — single source.
 
 ### 3.6 Date Range
-- Flexible — controlled via config file
-- Suggested starting window: 24 months of GFS archive (adjustable in dashboard)
+- GFS: 2021-03-22 → 2026-09-30 (Phases 8–11), extended back to 2015-01-15 in Phase 12.
+- ECMWF: 2024-02-01 → 2026-09-30.
+- Head-to-head views use only the period both models cover. GFS-only views show the full record.
+- The last ~3 months of ERA5 are preliminary (ERA5T) and can be revised; flagged on the dashboard.
+- Dashboard date picker works at month resolution (see 4.4).
 
 ### 3.7 Skill Metrics
 | Metric | What it measures |
 |--------|-----------------|
 | **Bias** | Systematic over/under-forecasting |
 | **RMSE** | Typical magnitude of forecast errors |
-| **ACC** | Pattern correlation of anomalies vs climatology — the primary operational metric |
+| **ACC** | Correlation of forecast and observed anomalies relative to climatology |
+| **Frequency bias** | Forecast event frequency ÷ observed event frequency (precipitation, per threshold) |
+| **ETS** | Equitable threat score — skill at forecasting threshold exceedance, corrected for random hits (precipitation) |
+
+Definitions (fixed from Phase 8):
+- **Region/domain means are area-weighted by cos(latitude)** and pooled over all grid points and forecasts (RMSE = √ of pooled weighted MSE). v1 used unweighted means of grid-point values.
+- **Two ACCs, labelled clearly:**
+  - *Skill curves and metric cards:* spatial ACC computed per forecast over the region, then averaged over forecasts. This is the operational convention (and the basis of the 0.6 threshold).
+  - *Spatial maps:* temporal ACC at each grid point (the v1 definition).
+- Precipitation thresholds: 1, 5, 10 mm/24h (config).
+
+### 3.8 Verification Caveats (shown on the dashboard)
+- **ERA5 is produced with the ECMWF model.** Verifying ECMWF against ERA5 favours ECMWF; the head-to-head view says so.
+- **Terrain mismatch.** At 0.25° each model and ERA5 represent mountains at different heights. In mountain regions, part of the T2m and freezing-level "bias" reflects terrain representation, not forecast error.
+- **Model upgrades.** Skill changes across an upgrade date may reflect the model change. Known dates (config `model_versions`):
+  - GFS v15 (FV3 core): 2019-06-12 12z · GFS v16: 2021-03-22 12z · GFS v17: proposed Oct 2026 (after record end)
+  - Earlier GFS (v13, v14) and ECMWF IFS cycles (48r1, 49r1, 50r1 — 13 May 2026) to be confirmed at Phase 9/12 kickoff.
+- **ERA5 snow and precipitation** are weaker truth than ERA5 temperature or pressure, especially in complex terrain.
 
 ---
 
@@ -86,14 +135,16 @@ wx-verify/
 │   ├── raw/
 │   │   ├── gfs/               ← Cached raw GFS GRIB2 files
 │   │   └── era5/              ← Cached raw ERA5 NetCDF files
-│   └── processed/
-│       ├── forecasts/         ← Aligned, interpolated forecast arrays
-│       └── metrics/           ← Computed skill score outputs (CSV/NetCDF)
+│   ├── processed/             ← gitignored from Phase 8
+│   │   └── aggregates/        ← Monthly sufficient statistics per model/variable/domain
+│   └── dashboard/             ← Committed. Small files the dashboard reads (see 4.4)
 │
 ├── src/
 │   ├── data/
 │   │   ├── __init__.py
-│   │   ├── gfs_fetcher.py     ← GFS archive acquisition
+│   │   ├── gfs_fetcher.py     ← GFS archive acquisition (AWS)
+│   │   ├── gfs_ncar_fetcher.py← GFS long record (NCAR RDA) — Phase 12
+│   │   ├── ecmwf_fetcher.py   ← ECMWF open data (AWS mirror) — Phase 9
 │   │   ├── era5_fetcher.py    ← ERA5 CDS API acquisition
 │   │   └── base_fetcher.py    ← Abstract base class — model-agnostic interface
 │   │
@@ -121,46 +172,62 @@ wx-verify/
 
 ### 4.2 Config System
 
-All run parameters live in `config.yaml`. Nothing is hardcoded in source files.
+All run parameters live in `config.yaml`. Nothing is hardcoded in source files. v2 schema (Phase 8 introduces it with only `t2m`, `gfs`, `europe` enabled; later phases enable entries):
 
 ```yaml
-domain:
-  lat_min: 35
-  lat_max: 65
-  lon_min: -15
-  lon_max: 25
-
-date_range:
-  start: "2023-01-01"
-  end: "2024-12-31"
+runs: ["00", "12"]
+lead_times_hours: [24, 48, 72, 120, 240]
+keep_raw: false                 # delete raw files once a month is aggregated and validated
 
 models:
-  primary: "gfs"
-  comparison: null       # Set to "ecmwf" when ECMWF data added
+  gfs:
+    enabled: true
+    sources:
+      - {name: aws,  start: "2021-03-22", end: "2026-09-30"}
+      - {name: ncar, start: "2015-01-15", end: "2021-03-21", enabled: false}   # Phase 12
+  ecmwf:
+    enabled: false              # Phase 9
+    sources:
+      - {name: aws,  start: "2024-02-01", end: "2026-09-30"}
+
+model_versions:                 # vertical markers on time-based views
+  gfs:   [{name: "v15", date: "2019-06-12"}, {name: "v16", date: "2021-03-22"}]
+  ecmwf: []                     # filled at Phase 9 kickoff
 
 variables:
-  - name: "t2m"
-    long_name: "2m Temperature"
-    units: "°C"
+  t2m:  {long_name: "2m Temperature", units: "°C",  scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: true}
+  msl:  {long_name: "Mean sea level pressure", units: "hPa", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: false}
+  z500: {long_name: "500 hPa geopotential height", units: "m", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: false}
+  ws10: {long_name: "10m wind speed", units: "m/s", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: false}
+  frzl: {long_name: "Freezing level", units: "m", scores: [bias, rmse, acc], models: [gfs], enabled: false}
+  tp24: {long_name: "24h precipitation", units: "mm", scores: [freq_bias, ets, bias], thresholds: [1, 5, 10], models: [gfs, ecmwf], enabled: false}
+  swe:  {long_name: "Snow water equivalent", units: "mm", scores: [bias, rmse], models: [gfs, ecmwf], enabled: false}
 
-lead_times_hours: [24, 48, 72, 120, 240]
+domains:
+  europe:
+    bounds: {lat_min: 35, lat_max: 72, lon_min: -15, lon_max: 35}
+    enabled: true
+    regions:
+      "Western Europe": {lat_min: 35, lat_max: 65, lon_min: -15, lon_max: 25}
+      # ... remaining presets as Section 3.4
+  north_america_west:
+    bounds: {lat_min: 36, lat_max: 62, lon_min: -140, lon_max: -102}
+    enabled: false              # Phase 10
+    regions: {}                 # as Section 3.4
 
-gfs:
-  resolution: 0.25
-  runs_per_day: 4        # 00z, 06z, 12z, 18z
-
-era5:
-  resolution: 0.25
-  cds_variable: "2m_temperature"
+climatology: {source: era5_monthly_by_hour, period: [1991, 2020]}
+dashboard:   {map_resolution: 0.5, committed_size_budget_mb: 150}
 ```
+
+Per-variable source mappings (GRIB short names, CDS names, unit conversions) live in a variable registry in code, keyed by the config keys above — config chooses *what* runs, the registry knows *how* to fetch each variable from each source.
 
 ### 4.3 Technology Stack
 
 | Component | Technology | Reason |
 |-----------|-----------|--------|
-| Language | Python 3.11+ | Standard for scientific computing |
+| Language | Python 3.14 | Standard for scientific computing |
 | Data handling | xarray, pandas | Gridded and tabular data |
-| GFS data | cfgrib, ecmwflibs, requests | GRIB2 parsing and AWS S3 archive access (noaa-gfs-bdp-pds) |
+| GFS / ECMWF data | cfgrib, requests (ecmwflibs on Windows only) | GRIB2 parsing and AWS S3 archive access (noaa-gfs-bdp-pds) |
 | ERA5 data | cdsapi | Official Copernicus CDS client |
 | Metrics | numpy, scipy | Skill score computation |
 | Visualisation | plotly | Interactive charts |
@@ -168,7 +235,21 @@ era5:
 | Maps | plotly (choropleth) | Spatial error maps |
 | Version control | Git / GitHub | Source of truth |
 | Environment | Python venv | Reproducible dependencies |
-| IDE | VS Code | Windows-native, Claude Code compatible |
+| IDE | VS Code | Windows and macOS (Apple Silicon); Claude Code compatible |
+| Dev dependencies | requirements-dev.txt (pytest) | Kept out of the deployment requirements |
+
+### 4.4 Data Storage Design (from Phase 8)
+Goal: least disk space, exact metrics for any date window, and a small committed footprint for Streamlit Cloud.
+
+1. **Raw** (`data/raw/{source}/{domain}/…`, gitignored): only the configured domains, only 00z/12z. GFS global fields are subset to each domain in memory at fetch time. Deleted after aggregation when `keep_raw: false`.
+2. **Monthly aggregates** (`data/processed/aggregates/{model}/{variable}/{domain}/{YYYY-MM}.nc`, gitignored): per grid point and lead time, the sufficient statistics — count, Σe, Σe², Σf′, Σo′, Σf′², Σo′², Σf′o′ (e = forecast − ERA5, ′ = anomaly vs climatology); for precipitation, contingency counts (hits, misses, false alarms, correct negatives) per threshold. Any date window's grid-point bias/RMSE/temporal ACC is an exact sum over months.
+3. **Region tables** (`data/dashboard/region_monthly.parquet`, committed): per model × variable × region × lead time × month — area-weighted pooled sums for bias/RMSE, the sum and count of per-forecast spatial ACC, and pooled contingency counts. Skill curves and metric cards are exact for any month window.
+4. **Map tables** (`data/dashboard/maps/…`, committed): the same grid-point sufficient statistics summed per **year**, coarsened to 0.5°, float32 + zlib. Maps for a selected window use the whole years it covers; the dashboard states this.
+5. **Size budget:** committed `data/dashboard/` ≤ 150 MB (config). Each phase reports actual size. If exceeded, fall back to cloud hosting (Section 7).
+
+Consequences:
+- Adding a **region** to an existing domain needs that domain re-aggregated (re-fetch if raw was deleted). GFS byte-range fetches make this cheap; ECMWF cost checked in Phase 9.
+- The v1 files `aligned_test_jan2023.nc`, `climatology_t2m.nc` and `data/processed/metrics/` are retired in Phase 8 (resolves issues 006, 007).
 
 ---
 
@@ -292,6 +373,86 @@ Build steps:
 - Step 37 spec says "date range slider" — implemented as a static date range display (config values). The pipeline produces a single set of metrics over the full configured period; a time-slicing slider requires sub-period metric files that the current pipeline does not generate. Parked for a future enhancement.
 - Phase 6 files were first committed in the style-pass commit (step 40) rather than at step 41, because the requirements-fix session intervened before the Phase 6 commit was made.
 
+**v1.0 data coverage (found Oct 2026):** the deployed v1.0/v1.1 metrics were computed from 28 GFS runs, 1–7 January 2023, and the ACC climatology was the January 2023 mean only. The dashboard did not state this. Phase 8 replaces both.
+
+---
+
+### Phase 8 — Generalised Pipeline & Storage Redesign (v1.5)
+*Goal: one pipeline that loops over model × variable × domain from config, with the storage design in 4.4. Scope is deliberately narrow: GFS (AWS), T2m, `europe` domain, 2021-03-22 → 2026-09-30. Everything after this is mostly config.*
+
+**Learning checkpoint before starting:** Why domain means are weighted by cos(latitude); pooled vs averaged RMSE; temporal (grid-point) ACC vs spatial (per-forecast) ACC and which one the 0.6 threshold refers to; what a 30-year climatological normal is and why a single month is not one; sufficient statistics (why storing Σe and Σe² is enough to recover RMSE for any window).
+
+Build steps:
+48. Config v2 schema and loader (Section 4.2) with validation. Variable registry in code. Single source for lead times — remove the duplicate `LEAD_TIMES` in `components.py`; skill-curve ticks and intermediate gridlines derive from config.
+49. Generalise `base_fetcher` and `gfs_fetcher`: fetch by (variable, domain, month, runs), subset to domain in memory, 00z/12z only. Raw layout per 4.4.
+50. ERA5 fetcher generalised the same way (variable, domain, month, hours 00/12 + valid times needed). Add climatology fetch: ERA5 monthly averaged by hour of day, 1991–2020, per variable and domain.
+51. Climatology module rebuilt on the 1991–2020 normal, by month and hour of day.
+52. Aggregation module: align → anomalies → monthly sufficient statistics (4.4 item 2). Validate before writing. Delete raw for that month when `keep_raw: false`.
+53. Region-table and map-table builders (4.4 items 3–4), cos(lat)-weighted. Metric functions compute from sufficient statistics; existing unit tests updated and new tests added for weighting, pooling and spatial ACC against hand-computed values.
+54. Pipeline runner: `python -m src.pipeline --model gfs --variable t2m --domain europe --start … --end …`. Resumable (skips completed months), logs progress, safe to leave running.
+55. Dashboard reads only `data/dashboard/`. Sidebar selectors built from config: model, variable, domain → region, date range (month resolution). Model-version markers drawn on any time-based chart (none yet beyond the first).
+56. `requirements-dev.txt` with pytest. Integration tests skip cleanly when CDS credentials or raw data are absent (resolves 008).
+57. Retire v1 data files and the on-the-fly recompute path (resolves 006, 007). Keep a copy of the v1 metric maps outside the repo until the step 59 regression check passes.
+58. Run the full GFS T2m Europe period. Report runtime, raw disk peak, committed size vs budget.
+59. Sanity checks: (a) regression — recompute 1–7 Jan 2023 grid-point bias and RMSE from the new aggregates and match the v1 maps (ACC and domain means will differ by design: new climatology, cos-lat weighting); (b) spot-check one grid point and one region by hand for one month; (c) confirm skill decreases with lead time and magnitudes are plausible against published GFS T2m skill.
+60. Spec vs build audit; dead code removal. Commit: "Phase 8 complete — generalised pipeline".
+
+---
+
+### Phase 9 — ECMWF Head-to-Head (v1.6)
+*Goal: GFS vs ECMWF for T2m over the common period.*
+
+**Learning checkpoint before starting:** How ERA5 is produced and why it favours ECMWF in this comparison; ECMWF IFS cycle upgrades in the record; how to read a difference map (sign convention).
+
+Build steps:
+61. Kickoff checks (report before building): ECMWF open data on AWS — file/index layout, byte-range feasibility, parameter names (`2t`, `msl`, `10u`, `10v`, `gh` @500, `tp`, `sd`); confirm IFS cycle dates for `model_versions`.
+62. `ecmwf_fetcher.py` extending `base_fetcher`, same interface as GFS. Enable `ecmwf` in config.
+63. Run ECMWF T2m Europe 2024-02-01 → 2026-09-30.
+64. Dashboard comparison mode: side-by-side (overlaid) skill curves for both models; spatial difference map (RMSE_GFS − RMSE_ECMWF, diverging scale, positive = ECMWF better); common-period enforcement; ERA5 caveat text (3.8).
+65. Audit, commit: "Phase 9 complete — ECMWF comparison".
+
+---
+
+### Phase 10 — Continuous Variables & North America (v1.7)
+*Goal: MSLP, Z500, wind speed, freezing level; `north_america_west` domain; mountain region presets.*
+
+**Learning checkpoint before starting:** Why Z500 ACC is the headline operational skill measure; MSLP reduction over high terrain; wind speed verification pitfalls (scalar vs vector, terrain and surface roughness); how freezing level is defined in GFS vs ERA5 and the above-ground vs above-sea-level distinction; terrain mismatch between model and reanalysis grids.
+
+Build steps:
+66. Kickoff checks (report before building): GRIB/CDS names and units for every variable in every source; freezing-level height reference in GFS (`HGT` at 0°C isotherm) vs ERA5 (`deg0l`, height above surface) — convert to a common reference (above sea level using ERA5 orography) and mask where the freezing level is at the surface.
+67. Registry entries for `msl`, `z500`, `ws10`, `frzl`; enable in config. No new code paths beyond derived variables (`ws10`) and the freezing-level conversion.
+68. Enable `north_america_west` and the new region presets (3.4).
+69. Run all enabled combinations. Report committed size vs budget.
+70. Dashboard: variable selector, per-variable units/colour scales, terrain caveat shown for mountain regions.
+71. Audit, commit: "Phase 10 complete — variables and North America".
+
+---
+
+### Phase 11 — Precipitation & Snow (v1.8)
+*Goal: categorical verification of 24h precipitation; SWE as a stretch goal.*
+
+**Learning checkpoint before starting:** Why RMSE is a poor score for precipitation (skewed, intermittent); contingency tables, frequency bias, ETS; how GFS and ECMWF store accumulated precipitation (GFS bucket resets vs ECMWF accumulation from initialisation); ERA5 precipitation and snow quality in mountains.
+
+Build steps:
+72. Kickoff checks: accumulation conventions per source; SWE field names/units (GFS `WEASD` kg m⁻², ECMWF/ERA5 `sd` m water equivalent) and availability across the whole record. If SWE is not consistently available, park it (Outstanding Issues) — do not force it.
+73. `tp24` derivation per source (24h window ending at each lead time); contingency-count aggregation; frequency bias and ETS.
+74. Dashboard: threshold selector; precipitation views show frequency bias and ETS instead of RMSE/ACC.
+75. `swe` (stretch) as a continuous variable.
+76. Audit, commit: "Phase 11 complete — precipitation and snow".
+
+---
+
+### Phase 12 — Long GFS Record & Skill Through Time (v2.0)
+*Goal: GFS back to January 2015 and a view comparing skill between two periods.*
+
+**Learning checkpoint before starting:** GFS history 2015–2021 (spectral core → FV3 in v15, v16 changes); why verifying every period against the same ERA5 truth makes era comparisons fair; sampling uncertainty — how much of a year-to-year skill difference is noise.
+
+Build steps:
+77. Kickoff checks (report before building): NCAR RDA `d084001` access — whether byte-range/index access or server-side subsetting is possible; if only whole files, estimate download volume and propose a reduced sample (e.g. 00z only) for Zac to approve. Confirm GFS v13/v14 dates.
+78. `gfs_ncar_fetcher.py` as a second GFS source. Enable `ncar` source; run GFS for all enabled variables and domains back to 2015-01-15 (variables limited to what the archive provides).
+79. Skill-through-time view: pick two periods (e.g. a year a decade ago vs the latest year), same model/variable/region; overlaid skill curves and a difference map; model-version markers and which versions each period covers.
+80. Final README (written with Zac — not by Claude Code), full audit. Tag `v2.0`. Commit: "Phase 12 complete — wx-verify v2.0".
+
 ---
 
 ## 6. Outstanding Issues
@@ -315,15 +476,13 @@ Build steps:
 
 | Feature | Description |
 |---------|-------------|
-| ECMWF comparison | Head-to-head GFS vs ECMWF skill scores. Requires ECMWF open data API access. |
-| Additional variables | 10m wind speed, 500hPa geopotential height are config changes plus minor fetcher additions. Precipitation requires additional skill scores such as ETS. |
 | Ensemble verification | GFS ensemble spread/skill relationship. Requires ensemble archive access. |
 | Seasonal breakdown | Skill scores stratified by season — winter vs summer performance differences. |
 | Regional sub-selection | User draws a custom bounding box on the map to define an arbitrary region for metric computation. Requires interactive map selection. |
-| Extended domain / additional regions | North Atlantic, North America as selectable regions via config. |
-| Project 2 hook | Statistical downscaling layer — if pursued, this repo extends into a Phase 8. Decision made in Claude.ai before any code is written. |
+| Additional domains | Japan and South America (Andes) — config-only after Phase 10. |
+| Project 2 hook | Statistical downscaling layer — if pursued, this repo extends into a later phase. Decision made in Claude.ai before any code is written. |
 | Date range pipeline trigger | Trigger new ERA5/GFS fetch from dashboard for a different date range. Level 3 feature. |
-| Cloud data hosting | Host processed metric files on cloud storage rather than in git repo. |
+| Cloud data hosting | Host dashboard data on cloud storage rather than in git. Fallback if the committed size budget (4.4) is exceeded. |
 
 ---
 
@@ -342,7 +501,9 @@ Build steps:
 | Source | What | Access | Cost |
 |--------|------|--------|------|
 | NOAA AWS S3 (noaa-gfs-bdp-pds) | GFS forecast archive | Public S3, no key required | Free |
-| Copernicus CDS | ERA5 reanalysis | Free account + API key required | Free |
+| NCAR RDA (d084001) | GFS 0.25° archive 2015–2021 (Phase 12) | Public download; method confirmed at Phase 12 kickoff | Free |
+| ECMWF open data (AWS `ecmwf-forecasts`) | IFS HRES forecasts from 2023 (0.25° from 2024-02-01) | Public, no key; CC-BY-4.0 attribution required | Free |
+| Copernicus CDS | ERA5 reanalysis (hourly + monthly-by-hour climatology) | Free account + API key required | Free |
 | Streamlit Community Cloud | Dashboard hosting | GitHub login | Free |
 
 **ERA5 setup (do before Phase 2):**
@@ -373,6 +534,7 @@ Build steps:
 cd [path-to-wx-verify]
 python -m venv venv          # only first time
 venv\Scripts\activate        # Windows — activate environment
+source venv/bin/activate     # macOS
 pip install -r requirements.txt  # only when requirements changed
 code .                       # open VS Code
 # second terminal:
@@ -418,5 +580,5 @@ CDS_API_KEY=your-key-here
 
 ---
 
-*wx-verify · Version 1.1 · October 2026*
+*wx-verify · Version 1.2 · October 2026*
 *Spec is always the source of truth. Update here before building anywhere.*
