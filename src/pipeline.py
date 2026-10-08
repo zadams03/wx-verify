@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 import signal
 import sys
 import time
@@ -51,6 +52,43 @@ def era5_months(init_dates: list[date], lead_times: list[int]) -> list[tuple[int
     return [(p.year, p.month) for p in pd.period_range(first, last, freq="M")]
 
 
+def purge_raw(model: str, variable: str, domain: str, up_to: tuple[int, int] | None = None) -> list:
+    """Delete monthly raw files (and leftover partial downloads) for this model and ERA5.
+
+    With ``up_to=(year, month)`` only months up to and including it are removed: ERA5
+    for month m is needed only by months m-1 and m, so once m is done nothing later
+    needs it. ``up_to=None`` removes every monthly file. The 1991-2020 climatology
+    download is never touched.
+    """
+    pattern = re.compile(rf"^{re.escape(variable)}_(\d{{4}})-(\d{{2}})\.nc(\.part)?$")
+    removed = []
+    for source in (model, "era5"):
+        folder = paths.raw_dir(source, domain)
+        if not folder.exists():
+            continue
+        for f in sorted(folder.iterdir()):
+            m = pattern.match(f.name)
+            if m and (up_to is None or (int(m[1]), int(m[2])) <= up_to):
+                f.unlink()
+                removed.append(f)
+        tmp = folder / ".tmp"
+        if tmp.is_dir():
+            for f in tmp.iterdir():
+                f.unlink()
+    return removed
+
+
+def _validated(fetcher: BaseFetcher, path, *args) -> None:
+    """Validate a cached/fetched file; a file that fails is deleted so it is
+    re-downloaded next time instead of failing forever."""
+    try:
+        fetcher.validate(path, *args)
+    except ValueError:
+        path.unlink(missing_ok=True)
+        logger.warning("Deleted raw file that failed validation: %s", path)
+        raise
+
+
 def process_month(
     cfg: Config,
     model: str,
@@ -64,14 +102,17 @@ def process_month(
 ) -> dict:
     """Process one month. Returns the run counts; skips months already aggregated.
 
-    Raw files are deleted only after the aggregate has been validated and written.
-    ERA5 for the previous month is deleted too, since no later month needs it.
+    With keep_raw false, raw files are deleted only after the aggregate has been
+    validated and written — on every path: after a new aggregate, when a finished
+    month is skipped, and after a forced re-run (see purge_raw).
     """
     keep_raw = cfg.keep_raw if keep_raw is None else keep_raw
     label = month_label(year, month)
     ident = {"model": model, "variable": variable, "domain": domain, "month": label}
     if not force and is_month_done(model, variable, domain, label):
         logger.info("Skip %s %s %s %s (done)", model, variable, domain, label)
+        if not keep_raw:
+            purge_raw(model, variable, domain, up_to=(year, month))
         return {}
 
     gfs = FETCHERS[model](cfg)
@@ -79,7 +120,7 @@ def process_month(
     clim = ensure_climatology(cfg, variable, domain)
 
     gfs_path = gfs.fetch_month(variable, domain, year, month, init_dates=init_dates)
-    gfs.validate(gfs_path, variable, domain)
+    _validated(gfs, gfs_path, variable, domain)
     forecast = gfs.load(gfs_path, variable)
 
     inits = init_dates if init_dates is not None else gfs.init_dates(year, month)
@@ -87,7 +128,7 @@ def process_month(
     era5_files = []
     for y, m in era5_months(inits, cfg.lead_times_hours):
         p = era5.fetch_month(variable, domain, y, m, hours=hours)
-        era5.validate(p, variable, domain, y, m)
+        _validated(era5, p, variable, domain, y, m)
         era5_files.append(p)
     obs = xr.concat([era5.load(p, variable) for p in era5_files], dim="time")
 
@@ -96,11 +137,7 @@ def process_month(
     logger.info("Aggregated %s %s %s %s: %s", model, variable, domain, label, agg.counts)
 
     if not keep_raw:
-        gfs_path.unlink()
-        prev = pd.Period(label, "M") - 1
-        prev_file = era5.raw_path(variable, domain, prev.year, prev.month)
-        if prev_file.exists():
-            prev_file.unlink()
+        purge_raw(model, variable, domain, up_to=(year, month))
     return agg.counts
 
 
@@ -161,6 +198,17 @@ def _rebuild_tables(cfg: Config) -> None:
         logger.exception("Dashboard table rebuild FAILED — rerun the pipeline command to rebuild")
 
 
+def _finish(cfg: Config, combos, keep_raw_flag: bool) -> None:
+    """End of run (normal, failed months or interrupted): rebuild tables, then drop
+    any raw files still on disk unless keep_raw is set."""
+    _rebuild_tables(cfg)
+    if not (keep_raw_flag or cfg.keep_raw):
+        for model, variable, domain in combos:
+            removed = purge_raw(model, variable, domain)
+            if removed:
+                logger.info("Removed %d leftover raw files for %s/%s/%s", len(removed), model, variable, domain)
+
+
 def _raise_interrupt(signum, frame) -> None:
     raise KeyboardInterrupt
 
@@ -210,9 +258,9 @@ def main(argv: list[str] | None = None) -> int:
                     skipped += 1
     except KeyboardInterrupt:
         logger.warning("Interrupted — completed months are saved; rerun the same command to resume")
-        _rebuild_tables(cfg)
+        _finish(cfg, combos, args.keep_raw)
         return 130
-    _rebuild_tables(cfg)
+    _finish(cfg, combos, args.keep_raw)
     logger.info("Finished in %.0f min: %d processed, %d already done, %d failed; runs %s",
                 (time.time() - t0) / 60, done, skipped, len(failed), totals)
     for tag in failed:
