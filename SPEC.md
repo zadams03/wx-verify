@@ -419,16 +419,18 @@ Build steps:
 ---
 
 ### Phase 9 — ECMWF Head-to-Head (v1.6)
-*Goal: GFS vs ECMWF for T2m over the common period.*
+*Goal: GFS vs ECMWF for T2m over the common period (initialisations 2024-02-01 → 2026-09-20), on an identical set of forecast runs.*
 
-**Learning checkpoint before starting:** How ERA5 is produced and why it favours ECMWF in this comparison; ECMWF IFS cycle upgrades in the record; how to read a difference map (sign convention).
+**Learning checkpoint before starting:** How ERA5 is produced and why it favours ECMWF in this comparison; ECMWF IFS cycle upgrades in the record; how to read a difference map (sign convention); why a paired comparison (same runs, same truth) is needed before attributing skill differences to the models.
 
 Build steps:
-61. Kickoff checks (report before building): ECMWF open data on AWS — file/index layout, byte-range feasibility, parameter names (`2t`, `msl`, `10u`, `10v`, `gh` @500, `tp`, `sd`); confirm IFS cycle dates for `model_versions`.
-62. `ecmwf_fetcher.py` extending `base_fetcher`, same interface as GFS. Enable `ecmwf` in config.
-63. Run ECMWF T2m Europe 2024-02-01 → 2026-09-20.
-64. Dashboard comparison mode: side-by-side (overlaid) skill curves for both models; spatial difference map (RMSE_GFS − RMSE_ECMWF, diverging scale, positive = ECMWF better); common-period enforcement; ERA5 caveat text (3.8).
-65. Audit, commit: "Phase 9 complete — ECMWF comparison".
+61. Kickoff checks (report before building): ECMWF open data on AWS — bucket, path and index-file layout (and whether it changed during the period), byte-range feasibility, 00z/12z availability for every day in the period (exact count of missing runs), parameter names for this and later phases (`2t`, `msl`, `10u`, `10v`, `gh` @500, `tp`, `sd`), grid (0.25°, longitude convention, latitude order); confirm IFS cycle dates within the period for `model_versions`; estimate download volume and runtime.
+62. `ecmwf_fetcher.py` extending `base_fetcher`, same interface as GFS (domain subset in memory, retries, present mask). Registry entry for ECMWF `t2m`. Enable `ecmwf` in config.
+63. Paired aggregation. The head-to-head uses only runs included for **both** models (homogeneous sample across models, SPEC 3.7). Each model's standalone aggregates stay as they are (each model's own homogeneous sample). For any month where the two run sets differ, also write comparison aggregates for both models over the intersected run set under `data/processed/aggregates/compare/gfs_vs_ecmwf/…` (re-fetching GFS for those months if raw is gone). Region and map tables gain a `comparison` key so the dashboard can read paired statistics. Coverage table records paired run counts.
+64. Run ECMWF T2m Europe for the full period, then the paired build. Report runs per model, paired runs, months that needed re-pairing, committed size vs budget.
+65. Dashboard comparison mode (model selector gains "GFS vs ECMWF"): overlaid skill curves (both models, same runs); metric cards for both; spatial difference map RMSE_GFS − RMSE_ECMWF (diverging scale, positive = ECMWF more accurate) with an option for bias of each model; period selector limited to the common period; header states paired run count; ERA5-lineage caveat (3.8) always visible in comparison mode; IFS cycle changes inside the window listed.
+66. Sanity checks: ECMWF standalone 24h RMSE and ACC plausible and better than or comparable to GFS; paired and standalone GFS numbers agree closely where run sets match; hand check of one region for one month.
+67. Audit, dead code removal, commit "Phase 9 complete — ECMWF comparison".
 
 ---
 
@@ -438,12 +440,12 @@ Build steps:
 **Learning checkpoint before starting:** Why Z500 ACC is the headline operational skill measure; MSLP reduction over high terrain; wind speed verification pitfalls (scalar vs vector, terrain and surface roughness); how freezing level is defined in GFS vs ERA5 and the above-ground vs above-sea-level distinction; terrain mismatch between model and reanalysis grids.
 
 Build steps:
-66. Kickoff checks (report before building): GRIB/CDS names and units for every variable in every source; freezing-level height reference in GFS (`HGT` at 0°C isotherm) vs ERA5 (`deg0l`, height above surface) — convert to a common reference (above sea level using ERA5 orography) and mask where the freezing level is at the surface.
-67. Registry entries for `msl`, `z500`, `ws10`, `frzl`; enable in config. No new code paths beyond derived variables (`ws10`) and the freezing-level conversion.
-68. Enable `north_america_west` and the new region presets (3.4).
-69. Run all enabled combinations. Report committed size vs budget.
-70. Dashboard: variable selector, per-variable units/colour scales; extend the mountain-region terrain caveat (55b) to freezing level and wind.
-71. Audit, commit: "Phase 10 complete — variables and North America".
+68. Kickoff checks (report before building): GRIB/CDS names and units for every variable in every source; freezing-level height reference in GFS (`HGT` at 0°C isotherm) vs ERA5 (`deg0l`, height above surface) — convert to a common reference (above sea level using ERA5 orography) and mask where the freezing level is at the surface.
+69. Registry entries for `msl`, `z500`, `ws10`, `frzl`; enable in config. No new code paths beyond derived variables (`ws10`) and the freezing-level conversion.
+70. Enable `north_america_west` and the new region presets (3.4).
+71. Run all enabled combinations. Report committed size vs budget.
+72. Dashboard: variable selector, per-variable units/colour scales; extend the mountain-region terrain caveat (55b) to freezing level and wind.
+73. Audit, commit: "Phase 10 complete — variables and North America".
 
 ---
 
@@ -453,11 +455,11 @@ Build steps:
 **Learning checkpoint before starting:** Why RMSE is a poor score for precipitation (skewed, intermittent); contingency tables, frequency bias, ETS; how GFS and ECMWF store accumulated precipitation (GFS bucket resets vs ECMWF accumulation from initialisation); ERA5 precipitation and snow quality in mountains.
 
 Build steps:
-72. Kickoff checks: accumulation conventions per source; SWE field names/units (GFS `WEASD` kg m⁻², ECMWF/ERA5 `sd` m water equivalent) and availability across the whole record. If SWE is not consistently available, park it (Outstanding Issues) — do not force it.
-73. `tp24` derivation per source (24h window ending at each lead time); contingency-count aggregation; frequency bias and ETS.
-74. Dashboard: threshold selector; precipitation views show frequency bias and ETS instead of RMSE/ACC.
-75. `swe` (stretch) as a continuous variable.
-76. Audit, commit: "Phase 11 complete — precipitation and snow".
+74. Kickoff checks: accumulation conventions per source; SWE field names/units (GFS `WEASD` kg m⁻², ECMWF/ERA5 `sd` m water equivalent) and availability across the whole record. If SWE is not consistently available, park it (Outstanding Issues) — do not force it.
+75. `tp24` derivation per source (24h window ending at each lead time); contingency-count aggregation; frequency bias and ETS.
+76. Dashboard: threshold selector; precipitation views show frequency bias and ETS instead of RMSE/ACC.
+77. `swe` (stretch) as a continuous variable.
+78. Audit, commit: "Phase 11 complete — precipitation and snow".
 
 ---
 
@@ -467,10 +469,10 @@ Build steps:
 **Learning checkpoint before starting:** GFS history 2015–2021 (spectral core → FV3 in v15, v16 changes); why verifying every period against the same ERA5 truth makes era comparisons fair; sampling uncertainty — how much of a year-to-year skill difference is noise.
 
 Build steps:
-77. Kickoff checks (report before building): NCAR RDA `d084001` access — whether byte-range/index access or server-side subsetting is possible; if only whole files, estimate download volume and propose a reduced sample (e.g. 00z only) for Zac to approve. Confirm GFS v13/v14 dates.
-78. `gfs_ncar_fetcher.py` as a second GFS source. Enable `ncar` source; run GFS for all enabled variables and domains back to 2015-01-15 (variables limited to what the archive provides).
-79. Skill-through-time view: pick two periods (e.g. a year a decade ago vs the latest year), same model/variable/region; overlaid skill curves and a difference map; model-version markers and which versions each period covers.
-80. Final README (written with Zac — not by Claude Code), full audit. Tag `v2.0`. Commit: "Phase 12 complete — wx-verify v2.0".
+79. Kickoff checks (report before building): NCAR RDA `d084001` access — whether byte-range/index access or server-side subsetting is possible; if only whole files, estimate download volume and propose a reduced sample (e.g. 00z only) for Zac to approve. Confirm GFS v13/v14 dates.
+80. `gfs_ncar_fetcher.py` as a second GFS source. Enable `ncar` source; run GFS for all enabled variables and domains back to 2015-01-15 (variables limited to what the archive provides).
+81. Skill-through-time view: pick two periods (e.g. a year a decade ago vs the latest year), same model/variable/region; overlaid skill curves and a difference map; model-version markers and which versions each period covers.
+82. Final README (written with Zac — not by Claude Code), full audit. Tag `v2.0`. Commit: "Phase 12 complete — wx-verify v2.0".
 
 ---
 
