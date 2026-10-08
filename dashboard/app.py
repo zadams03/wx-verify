@@ -17,7 +17,6 @@ if str(_REPO_ROOT) not in sys.path:
 
 from src.utils.config import load_config
 from src.viz.components import (
-    LEAD_TIMES,
     inject_card_styles,
     render_date_range_selector,
     render_lead_time_selector,
@@ -120,10 +119,11 @@ def _recompute_spatial_for_window(
 def _compute_regional_summary(
     spatial: dict[str, xr.DataArray | None],
     bounds: dict[str, float],
+    lead_times: list[int],
 ) -> pd.DataFrame:
     """Domain-mean metrics subsetted to region bounding box."""
     rows = []
-    for lt in LEAD_TIMES:
+    for lt in lead_times:
         row: dict = {"lead_time_h": lt}
         for name in ("bias", "rmse", "acc"):
             da = spatial.get(name)
@@ -166,10 +166,8 @@ inject_card_styles()
 # Config & data
 # ---------------------------------------------------------------------------
 
-try:
-    cfg = load_config()
-except Exception:
-    cfg = None
+cfg = load_config()
+europe_regions = cfg.regions("europe")
 
 summary_df = _load_summary()
 spatial: dict[str, xr.DataArray | None] = {
@@ -196,7 +194,7 @@ with st.sidebar:
     st.caption("NWP Forecast Verification Dashboard")
     st.divider()
 
-    region_name, region_bounds = render_region_selector()
+    region_name, region_bounds = render_region_selector(europe_regions)
 
     st.divider()
 
@@ -208,17 +206,11 @@ with st.sidebar:
         date_start, date_end = render_date_range_selector(data_min_date, data_max_date)
     else:
         date_start = date_end = None
-        if cfg is not None:
-            st.markdown("**Data period**")
-            st.caption(f"{cfg.date_range.start} — {cfg.date_range.end}")
 
-    if cfg is not None:
-        st.markdown("**Model**")
-        st.caption(cfg.models.primary.upper())
-        st.markdown("**Variable**")
-        st.caption(cfg.variables[0].long_name)
-    else:
-        st.caption("config.yaml not found")
+    st.markdown("**Model**")
+    st.caption(cfg.enabled_models()[0].upper())
+    st.markdown("**Variable**")
+    st.caption(cfg.variables[cfg.enabled_variables()[0]].long_name)
 
     st.divider()
     st.caption("v1.1 · October 2026")
@@ -244,7 +236,7 @@ if not has_data:
     st.stop()
 
 # Lead time selector
-lead_time_h = render_lead_time_selector()
+lead_time_h = render_lead_time_selector(cfg.lead_times_hours)
 
 st.markdown("---")
 
@@ -285,7 +277,9 @@ else:
 
 # Regional summary for selected region and period
 if any(v is not None for v in effective_spatial.values()):
-    region_summary = _compute_regional_summary(effective_spatial, region_bounds)
+    region_summary = _compute_regional_summary(
+        effective_spatial, region_bounds, cfg.lead_times_hours
+    )
 else:
     region_summary = summary_df
 
@@ -301,7 +295,7 @@ with col_left:
     fig_curves = build_skill_curves(
         region_summary,
         region_name,
-        lead_times=cfg.lead_times_hours if cfg is not None else None,
+        lead_times=cfg.lead_times_hours,
     )
     st.plotly_chart(fig_curves, width="stretch")
 

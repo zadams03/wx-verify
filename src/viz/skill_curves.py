@@ -12,11 +12,9 @@ _COLOR_GRID = "rgba(180,180,180,0.25)"
 _COLOR_GRID_MINOR = "rgba(180,180,180,0.12)"
 _COLOR_THRESHOLD = "rgba(80,80,80,0.65)"
 
-# Data points get standard gridlines via tickvals.
+# Data points (config lead times) get standard gridlines via tickvals.
 # Intermediate 24h multiples are drawn as lighter shapes below the traces.
-_TICK_VALS = [24, 48, 72, 120, 240]
-_TICK_TEXT = [f"{h}h" for h in _TICK_VALS]
-_INTERMEDIATE_GRIDLINES = [96, 144, 168, 192, 216]
+_GRID_STEP_H = 24
 
 # X-axis padding either side of the configured lead times (multiplicative,
 # since the axis is logarithmic).
@@ -31,8 +29,8 @@ def build_skill_curves(
 ) -> go.Figure:
     """Plotly line chart of domain-mean RMSE, ACC, and Bias vs lead time.
 
-    X-axis: logarithmic. Gridlines at every 24h interval (24–240h).
-    Labels only at the 5 data points (24/48/72/120/240h).
+    X-axis: logarithmic. Gridlines at every 24h interval within the lead-time range.
+    Labels only at the configured lead times.
     Y-axes: ACC on left [0–1], RMSE/Bias (°C) on right.
     ACC=0.6 skill threshold reference line.
     X-axis range is derived from ``lead_times`` (config lead_times_hours);
@@ -45,7 +43,12 @@ def build_skill_curves(
     rmse = summary_df["rmse_mean"].tolist()
     bias = summary_df["bias_mean"].tolist()
 
-    axis_lead_times = lead_times or lt
+    axis_lead_times = sorted(lead_times or lt)
+    tick_text = [f"{h}h" for h in axis_lead_times]
+    intermediate_gridlines = [
+        h for h in range(_GRID_STEP_H, max(axis_lead_times), _GRID_STEP_H)
+        if h > min(axis_lead_times) and h not in axis_lead_times
+    ]
     # Plotly log axes take the range in log10 units.
     x_range = [
         math.log10(_X_PAD_LOW * min(axis_lead_times)),
@@ -116,7 +119,7 @@ def build_skill_curves(
 
     # Intermediate gridlines — lighter/thinner than the data-point gridlines.
     # xref="x" on a log axis expects log10 of the data value.
-    for _h in _INTERMEDIATE_GRIDLINES:
+    for _h in intermediate_gridlines:
         fig.add_shape(
             type="line",
             x0=math.log10(_h), x1=math.log10(_h),
@@ -131,8 +134,8 @@ def build_skill_curves(
         type="log",
         range=x_range,
         tickmode="array",
-        tickvals=_TICK_VALS,
-        ticktext=_TICK_TEXT,
+        tickvals=axis_lead_times,
+        ticktext=tick_text,
         title_text="Forecast Lead Time",
         title_font=dict(size=13),
         showgrid=True,

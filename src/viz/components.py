@@ -5,9 +5,9 @@ from datetime import date as _date
 import pandas as pd
 import streamlit as st
 
+from src.utils.config import Bounds
+
 __all__ = [
-    "LEAD_TIMES",
-    "REGION_PRESETS",
     "CARD_STYLES",
     "inject_card_styles",
     "render_metric_cards",
@@ -16,29 +16,6 @@ __all__ = [
     "render_map_toggle",
     "render_date_range_selector",
 ]
-
-LEAD_TIMES = [24, 48, 72, 120, 240]
-
-REGION_PRESETS: dict[str, dict[str, float]] = {
-    "Western Europe (full domain)": {
-        "lat_min": 35.0, "lat_max": 65.0, "lon_min": -15.0, "lon_max": 25.0,
-    },
-    "UK & Ireland": {
-        "lat_min": 50.0, "lat_max": 59.0, "lon_min": -10.0, "lon_max": 2.0,
-    },
-    "Scandinavia": {
-        "lat_min": 55.0, "lat_max": 65.0, "lon_min": 5.0, "lon_max": 25.0,
-    },
-    "Mediterranean": {
-        "lat_min": 36.0, "lat_max": 46.0, "lon_min": -5.0, "lon_max": 28.0,
-    },
-    "Central Europe": {
-        "lat_min": 46.0, "lat_max": 55.0, "lon_min": 8.0, "lon_max": 20.0,
-    },
-    "Iberian Peninsula": {
-        "lat_min": 36.0, "lat_max": 44.0, "lon_min": -9.0, "lon_max": 3.0,
-    },
-}
 
 # Single CSS block — injected once by inject_card_styles(), not per card.
 CARD_STYLES = """
@@ -159,9 +136,9 @@ def render_metric_cards(summary_df: pd.DataFrame, lead_time_h: int) -> None:
             )
 
 
-def render_lead_time_selector(key: str = "lt") -> int:
+def render_lead_time_selector(lead_times: list[int], key: str = "lt") -> int:
     """Segmented button row for lead time selection. Returns selected lead time in hours."""
-    options = [f"{lt}h" for lt in LEAD_TIMES]
+    options = [f"{lt}h" for lt in lead_times]
     selected = st.segmented_control(
         "Lead Time",
         options=options,
@@ -169,18 +146,20 @@ def render_lead_time_selector(key: str = "lt") -> int:
         key=key,
     )
     if selected is None:
-        return LEAD_TIMES[0]
+        return lead_times[0]
     return int(selected.replace("h", ""))
 
 
-def render_region_selector(key: str = "region") -> tuple[str, dict[str, float]]:
-    """Dropdown region selector. Returns (region_name, bounds_dict)."""
-    region_name = st.selectbox(
-        "Region",
-        list(REGION_PRESETS.keys()),
-        key=key,
-    )
-    return region_name, REGION_PRESETS[region_name]
+def render_region_selector(
+    regions: dict[str, Bounds], key: str = "region"
+) -> tuple[str, dict[str, float]]:
+    """Dropdown region selector over config regions. Returns (region_name, bounds_dict)."""
+    region_name = st.selectbox("Region", list(regions), key=key)
+    b = regions[region_name]
+    return region_name, {
+        "lat_min": b.lat_min, "lat_max": b.lat_max,
+        "lon_min": b.lon_min, "lon_max": b.lon_max,
+    }
 
 
 def render_map_toggle(key: str = "map_metric") -> str:

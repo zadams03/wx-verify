@@ -1,28 +1,51 @@
-domain:
-  lat_min: 35
-  lat_max: 65
-  lon_min: -15
-  lon_max: 25
-
-date_range:
-  start: "2023-01-01"
-  end: "2024-12-31"
+runs: ["00", "12"]
+lead_times_hours: [24, 48, 72, 120, 240]
+keep_raw: false                 # delete raw files once a month is aggregated and validated
 
 models:
-  primary: "gfs"
-  comparison: null       # Set to "ecmwf" when ECMWF data added
+  gfs:
+    enabled: true
+    sources:
+      - {name: aws,  start: "2021-03-22", end: "2026-09-30"}
+      - {name: ncar, start: "2015-01-15", end: "2021-03-21", enabled: false}   # Phase 12
+  ecmwf:
+    enabled: false              # Phase 9
+    sources:
+      - {name: aws,  start: "2024-02-01", end: "2026-09-30"}
+
+model_versions:                 # vertical markers on time-based views
+  gfs:   [{name: "v15", date: "2019-06-12"}, {name: "v16", date: "2021-03-22"}]
+  ecmwf: []                     # filled at Phase 9 kickoff
 
 variables:
-  - name: "t2m"
-    long_name: "2m Temperature"
-    units: "°C"
+  t2m:  {long_name: "2m Temperature", units: "°C", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: true}
+  msl:  {long_name: "Mean sea level pressure", units: "hPa", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: false}
+  z500: {long_name: "500 hPa geopotential height", units: "m", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: false}
+  ws10: {long_name: "10m wind speed", units: "m/s", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: false}
+  frzl: {long_name: "Freezing level", units: "m", scores: [bias, rmse, acc], models: [gfs], enabled: false}
+  tp24: {long_name: "24h precipitation", units: "mm", scores: [freq_bias, ets, bias], thresholds: [1, 5, 10], models: [gfs, ecmwf], enabled: false}
+  swe:  {long_name: "Snow water equivalent", units: "mm", scores: [bias, rmse], models: [gfs, ecmwf], enabled: false}
 
-lead_times_hours: [24, 48, 72, 120, 240]
+domains:
+  europe:
+    bounds: {lat_min: 35, lat_max: 72, lon_min: -15, lon_max: 35}
+    enabled: true
+    regions:
+      "Western Europe":    {lat_min: 35,   lat_max: 65, lon_min: -15, lon_max: 25}
+      "UK & Ireland":      {lat_min: 50,   lat_max: 59, lon_min: -10, lon_max: 2}
+      "Scandinavia":       {lat_min: 55,   lat_max: 65, lon_min: 5,   lon_max: 25}
+      "Mediterranean":     {lat_min: 36,   lat_max: 46, lon_min: -5,  lon_max: 28}
+      "Central Europe":    {lat_min: 46,   lat_max: 55, lon_min: 8,   lon_max: 20}
+      "Iberian Peninsula": {lat_min: 36,   lat_max: 44, lon_min: -9,  lon_max: 3}
+      "European Alps":     {lat_min: 43.5, lat_max: 48.5, lon_min: 5, lon_max: 16.5}
+      "Norwegian Mountains": {lat_min: 58, lat_max: 71, lon_min: 5,   lon_max: 31}
+  north_america_west:
+    bounds: {lat_min: 36, lat_max: 62, lon_min: -140, lon_max: -102}
+    enabled: false              # Phase 10
+    regions:
+      "Pacific Northwest": {lat_min: 42, lat_max: 49, lon_min: -125, lon_max: -116}
+      "Western Canada":    {lat_min: 49, lat_max: 60, lon_min: -135, lon_max: -110}
+      "Rockies":           {lat_min: 37, lat_max: 55, lon_min: -120, lon_max: -104}
 
-gfs:
-  resolution: 0.25
-  runs_per_day: 4        # 00z, 06z, 12z, 18z
-
-era5:
-  resolution: 0.25
-  cds_variable: "2m_temperature"
+climatology: {source: era5_monthly_by_hour, period: [1991, 2020]}
+dashboard:   {map_resolution: 0.5, committed_size_budget_mb: 150}
