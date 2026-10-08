@@ -2,6 +2,13 @@
 
     python -m src.pipeline --model gfs --variable t2m --domain europe --start 2021-03 --end 2026-09
 
+Paired (head-to-head) build, after both models are done:
+
+    python -m src.pipeline --compare gfs_vs_ecmwf --variable t2m --domain europe --start 2024-02 --end 2026-09
+
+Dashboard tables are rebuilt at the end of a run unless --no-tables is given (tests,
+partial runs); `python -m src.pipeline --tables-only` rebuilds them without processing.
+
 Resumable: months whose aggregate already exists are skipped, and every file is
 written atomically, so the run can be stopped (Ctrl-C / kill) and restarted.
 Progress goes to logs/pipeline.log and the console.
@@ -23,7 +30,8 @@ from src.data.base_fetcher import BaseFetcher
 from src.data.ecmwf_fetcher import ECMWFFetcher
 from src.data.era5_fetcher import ERA5Fetcher, required_hours
 from src.data.gfs_fetcher import GFSFetcher
-from src.processing.aggregate import aggregate_month, is_month_done, write_aggregate
+from src.processing.aggregate import aggregate_month, is_month_done, runs_path, write_aggregate
+from src.processing import pairing
 from src.processing.climatology import build_climatology, load_climatology, save_climatology
 from src.utils import paths
 from src.utils.config import Config, load_config
@@ -142,6 +150,85 @@ def process_month(
     return agg.counts
 
 
+def process_paired_month(
+    cfg: Config,
+    comparison: str,
+    variable: str,
+    domain: str,
+    year: int,
+    month: int,
+    keep_raw: bool | None = None,
+    force: bool = False,
+) -> dict:
+    """Pair one month's runs for a head-to-head and write comparison aggregates if needed.
+
+    Both models' standalone aggregates must already exist. The included-run lists are
+    compared (not counts). If they are identical the standalone aggregates are the paired
+    ones and only the pairing record is written. Otherwise both models are re-aggregated
+    over the intersection into aggregates/compare/{comparison}/… — fetching raw files that
+    were deleted — with ERA5 fetched once for the pair. Returns the pairing summary.
+    """
+    keep_raw = cfg.keep_raw if keep_raw is None else keep_raw
+    label = month_label(year, month)
+    models = pairing.comparison_models(comparison)
+    for m in models:
+        if not is_month_done(m, variable, domain, label):
+            raise RuntimeError(f"{m} {variable} {domain} {label} is not aggregated yet — run it before pairing")
+
+    fetchers = {m: FETCHERS[m](cfg) for m in models}
+    runs = {m: pairing.included_runs(cfg, fetchers[m], variable, domain, label) for m in models}
+    pr = pairing.pair_runs(label, runs)
+    if not len(pr.paired):
+        raise RuntimeError(f"No runs are included for both {models} in {label}")
+
+    if not pr.identical:
+        have = [is_month_done(m, variable, domain, label, comparison) for m in models]
+        same = all(have) and all(
+            pd.read_parquet(runs_path(m, variable, domain, label, comparison))["init_time"].equals(
+                pd.Series(pr.paired, name="init_time")) for m in models)
+        if force or not same:
+            _write_comparison_month(cfg, comparison, models, fetchers, variable, domain, year, month, pr.paired)
+        else:
+            logger.info("Skip pairing %s %s %s (comparison aggregates current)", comparison, variable, label)
+        logger.info("Paired %s %s %s: %s included runs -> %d paired; dropped %s",
+                    comparison, variable, label, pr.n_runs, len(pr.paired), pr.dropped)
+    else:
+        logger.info("Paired %s %s %s: identical run sets (%d runs) — standalone aggregates used",
+                    comparison, variable, label, len(pr.paired))
+    pairing.write_pairing(comparison, variable, domain, pr)
+
+    if not keep_raw:
+        for m in models:
+            purge_raw(m, variable, domain, up_to=(year, month))
+    return {"identical": pr.identical, "n_runs": pr.n_runs, "n_paired": len(pr.paired), "dropped": pr.dropped}
+
+
+def _write_comparison_month(cfg, comparison, models, fetchers, variable, domain, year, month, paired) -> None:
+    """Aggregate every model over the same (paired) runs; ERA5 and climatology loaded once."""
+    label = month_label(year, month)
+    era5 = ERA5Fetcher(cfg)
+    clim = ensure_climatology(cfg, variable, domain)
+    hours = required_hours(cfg.runs, cfg.lead_times_hours)
+    inits = [t.date() for t in paired]
+    era5_files = []
+    for y, m in era5_months(inits, cfg.lead_times_hours):
+        p = era5.fetch_month(variable, domain, y, m, hours=hours)
+        _validated(era5, p, variable, domain, y, m)
+        era5_files.append(p)
+    obs = xr.concat([era5.load(p, variable) for p in era5_files], dim="time")
+
+    for m in models:
+        f = fetchers[m]
+        path = f.fetch_month(variable, domain, year, month)
+        _validated(f, path, variable, domain)
+        forecast = f.load(path, variable)
+        forecast = forecast.sel(init_time=paired.values.astype("datetime64[ns]"))
+        ident = {"model": m, "variable": variable, "domain": domain, "month": label}
+        agg = aggregate_month(forecast, obs, clim, cfg.domains[domain].regions, ident)
+        write_aggregate(agg, ident, comparison=comparison)
+        logger.info("Aggregated %s %s %s %s %s (paired): %s", comparison, m, variable, domain, label, agg.counts)
+
+
 # ---------------------------------------------------------------------------
 # Command line
 # ---------------------------------------------------------------------------
@@ -202,10 +289,11 @@ def _rebuild_tables(cfg: Config) -> None:
         logger.exception("Dashboard table rebuild FAILED — rerun the pipeline command to rebuild")
 
 
-def _finish(cfg: Config, combos, keep_raw_flag: bool) -> None:
-    """End of run (normal, failed months or interrupted): rebuild tables, then drop
-    any raw files still on disk unless keep_raw is set."""
-    _rebuild_tables(cfg)
+def _finish(cfg: Config, combos, keep_raw_flag: bool, tables: bool = True) -> None:
+    """End of run (normal, failed months or interrupted): rebuild tables (unless
+    --no-tables), then drop any raw files still on disk unless keep_raw is set."""
+    if tables:
+        _rebuild_tables(cfg)
     if not (keep_raw_flag or cfg.keep_raw):
         for model, variable, domain in combos:
             removed = purge_raw(model, variable, domain)
@@ -217,6 +305,12 @@ def _raise_interrupt(signum, frame) -> None:
     raise KeyboardInterrupt
 
 
+def _compare_months(cfg: Config, comparison: str, start: str | None, end: str | None) -> list[tuple[int, int]]:
+    """Months in which every model of the comparison has data (the common period)."""
+    months = [set(_months(cfg, m, start, end)) for m in pairing.comparison_models(comparison)]
+    return sorted(set.intersection(*months))
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--model", help="default: every enabled model")
@@ -226,10 +320,21 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--end", help="last month, YYYY-MM or YYYY-MM-DD (default: end of source range)")
     ap.add_argument("--keep-raw", action="store_true", help="override config keep_raw: false")
     ap.add_argument("--force", action="store_true", help="redo months that are already aggregated")
+    ap.add_argument("--compare", metavar="NAME", help="paired head-to-head build, e.g. gfs_vs_ecmwf "
+                    "(both models' standalone months must be done)")
+    ap.add_argument("--no-tables", action="store_true",
+                    help="do not rebuild the committed dashboard tables (tests, partial runs)")
+    ap.add_argument("--tables-only", action="store_true",
+                    help="only rebuild the dashboard tables from the aggregates on disk")
     args = ap.parse_args(argv)
+    if args.no_tables and args.tables_only:
+        ap.error("--no-tables and --tables-only contradict each other")
 
     _setup_logging()
     cfg = load_config()
+    if args.tables_only:
+        _rebuild_tables(cfg)
+        return 0
     # Turn SIGTERM into the same clean exit path as Ctrl-C.
     signal.signal(signal.SIGTERM, _raise_interrupt)
 
@@ -238,33 +343,61 @@ def main(argv: list[str] | None = None) -> int:
     failed: list[str] = []
     totals = {"n_runs_total": 0, "n_runs_included": 0,
               "n_excluded_forecast_missing": 0, "n_excluded_era5_missing": 0}
-    combos = _combos(cfg, args.model, args.variable, args.domain)
-    logger.info("Pipeline start: %s", combos)
+    if args.compare:
+        models = pairing.comparison_models(args.compare)
+        combos = [(m, v, d) for (_, v, d) in _combos(cfg, models[0], args.variable, args.domain) for m in models]
+    else:
+        combos = _combos(cfg, args.model, args.variable, args.domain)
+    tables = not args.no_tables
+    logger.info("Pipeline start: %s%s", combos, f" (paired: {args.compare})" if args.compare else "")
+    paired_summary: list[dict] = []
     try:
-        for model, variable, domain in combos:
-            months = _months(cfg, model, args.start, args.end)
-            for i, (year, month) in enumerate(months, 1):
-                tag = f"{model}/{variable}/{domain} {month_label(year, month)} [{i}/{len(months)}]"
-                t = time.time()
-                try:
-                    counts = process_month(cfg, model, variable, domain, year, month,
-                                           keep_raw=True if args.keep_raw else None, force=args.force)
-                except Exception:
-                    logger.exception("FAILED %s", tag)
-                    failed.append(tag)
-                    continue
-                if counts:
+        if args.compare:
+            for variable, domain in sorted({(v, d) for _, v, d in combos}):
+                months = _compare_months(cfg, args.compare, args.start, args.end)
+                for i, (year, month) in enumerate(months, 1):
+                    tag = f"{args.compare}/{variable}/{domain} {month_label(year, month)} [{i}/{len(months)}]"
+                    t = time.time()
+                    try:
+                        paired_summary.append(process_paired_month(
+                            cfg, args.compare, variable, domain, year, month,
+                            keep_raw=True if args.keep_raw else None, force=args.force) | {"month": month_label(year, month)})
+                    except Exception:
+                        logger.exception("FAILED %s", tag)
+                        failed.append(tag)
+                        continue
                     done += 1
-                    for k in totals:
-                        totals[k] += counts[k]
                     logger.info("Done %s in %.0fs", tag, time.time() - t)
-                else:
-                    skipped += 1
+        else:
+            for model, variable, domain in combos:
+                months = _months(cfg, model, args.start, args.end)
+                for i, (year, month) in enumerate(months, 1):
+                    tag = f"{model}/{variable}/{domain} {month_label(year, month)} [{i}/{len(months)}]"
+                    t = time.time()
+                    try:
+                        counts = process_month(cfg, model, variable, domain, year, month,
+                                               keep_raw=True if args.keep_raw else None, force=args.force)
+                    except Exception:
+                        logger.exception("FAILED %s", tag)
+                        failed.append(tag)
+                        continue
+                    if counts:
+                        done += 1
+                        for k in totals:
+                            totals[k] += counts[k]
+                        logger.info("Done %s in %.0fs", tag, time.time() - t)
+                    else:
+                        skipped += 1
     except KeyboardInterrupt:
         logger.warning("Interrupted — completed months are saved; rerun the same command to resume")
-        _finish(cfg, combos, args.keep_raw)
+        _finish(cfg, combos, args.keep_raw, tables)
         return 130
-    _finish(cfg, combos, args.keep_raw)
+    _finish(cfg, combos, args.keep_raw, tables)
+    if args.compare:
+        repaired = [r["month"] for r in paired_summary if not r["identical"]]
+        logger.info("Paired %d months: %d identical run sets, %d needed re-pairing %s; paired runs %d",
+                    len(paired_summary), len(paired_summary) - len(repaired), len(repaired), repaired,
+                    sum(r["n_paired"] for r in paired_summary))
     logger.info("Finished in %.0f min: %d processed, %d already done, %d failed; runs %s",
                 (time.time() - t0) / 60, done, skipped, len(failed), totals)
     for tag in failed:

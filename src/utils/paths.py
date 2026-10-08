@@ -14,8 +14,18 @@ def raw_dir(source: str, domain: str) -> Path:
     return DATA_ROOT / "raw" / source / domain
 
 
-def aggregates_dir(model: str, variable: str, domain: str) -> Path:
-    return DATA_ROOT / "processed" / "aggregates" / model / variable / domain
+def aggregates_dir(model: str, variable: str, domain: str, comparison: str | None = None) -> Path:
+    """Monthly aggregates; with ``comparison`` ('gfs_vs_ecmwf'), the paired-run ones."""
+    root = DATA_ROOT / "processed" / "aggregates"
+    if comparison:
+        root = root / "compare" / comparison
+    return root / model / variable / domain
+
+
+def pairing_path(comparison: str, variable: str, domain: str, month: str) -> Path:
+    """Record of how one month's run sets were paired (data/processed, gitignored)."""
+    return (DATA_ROOT / "processed" / "aggregates" / "compare" / comparison / "_pairing"
+            / variable / domain / f"{month}.json")
 
 
 def climatology_path(variable: str, domain: str) -> Path:
@@ -26,5 +36,8 @@ def dashboard_dir() -> Path:
     return DATA_ROOT / "dashboard"
 
 
-def map_dir(model: str, variable: str, domain: str) -> Path:
-    return dashboard_dir() / "maps" / model / variable / domain
+def map_dir(model: str, variable: str, domain: str, comparison: str | None = None) -> Path:
+    root = dashboard_dir() / "maps"
+    if comparison:
+        root = root / "compare" / comparison
+    return root / model / variable / domain

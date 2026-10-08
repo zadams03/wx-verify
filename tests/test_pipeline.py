@@ -185,3 +185,45 @@ def test_config_keep_raw_true_is_respected_at_end_of_run(root, monkeypatch):
     _touch("gfs", "t2m_2026-09.nc")
     pipeline._finish(replace(CFG, keep_raw=True), [("gfs", "t2m", "europe")], keep_raw_flag=False)
     assert "gfs/t2m_2026-09.nc" in _raw_files()
+
+
+# ---------------------------------------------------------------------------
+# --no-tables / --tables-only
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def table_calls(root, monkeypatch):
+    calls = {"tables": 0, "months": 0}
+    monkeypatch.setattr(pipeline, "_rebuild_tables", lambda cfg: calls.__setitem__("tables", calls["tables"] + 1))
+    monkeypatch.setattr(pipeline, "_setup_logging", lambda: None)
+
+    def fake_month(*a, **k):
+        calls["months"] += 1
+        return {"n_runs_total": 1, "n_runs_included": 1,
+                "n_excluded_forecast_missing": 0, "n_excluded_era5_missing": 0}
+
+    monkeypatch.setattr(pipeline, "process_month", fake_month)
+    return calls
+
+
+ARGS = ["--model", "gfs", "--variable", "t2m", "--domain", "europe", "--start", "2023-01", "--end", "2023-01"]
+
+
+def test_full_run_rebuilds_tables(table_calls):
+    assert pipeline.main(ARGS) == 0
+    assert table_calls == {"tables": 1, "months": 1}
+
+
+def test_no_tables_processes_months_but_leaves_tables_alone(table_calls):
+    assert pipeline.main(ARGS + ["--no-tables"]) == 0
+    assert table_calls == {"tables": 0, "months": 1}
+
+
+def test_tables_only_rebuilds_without_processing(table_calls):
+    assert pipeline.main(["--tables-only"]) == 0
+    assert table_calls == {"tables": 1, "months": 0}
+
+
+def test_no_tables_and_tables_only_contradict(table_calls):
+    with pytest.raises(SystemExit):
+        pipeline.main(["--no-tables", "--tables-only"])

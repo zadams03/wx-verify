@@ -3,7 +3,9 @@
 One month of raw forecasts + ERA5 becomes
   data/processed/aggregates/{model}/{variable}/{domain}/{YYYY-MM}.nc          grid-point sums
   data/processed/aggregates/{model}/{variable}/{domain}/{YYYY-MM}_regions.parquet  region sums
-Both are validated before they replace any existing file.
+  data/processed/aggregates/{model}/{variable}/{domain}/{YYYY-MM}_runs.parquet     every scheduled run and its status
+All are validated before they replace any existing file. Paired-run (head-to-head)
+aggregates have the same three files under aggregates/compare/{comparison}/….
 """
 from __future__ import annotations
 
@@ -32,6 +34,7 @@ class MonthAggregate:
     stats: xr.Dataset          # (lead_time, latitude, longitude) float64 sums
     regions: pd.DataFrame      # one row per region × lead time
     counts: dict[str, int]     # run inclusion / exclusion counts
+    runs: pd.DataFrame         # init_time × status: included | forecast_missing | era5_missing
 
 
 def aggregate_month(
@@ -46,7 +49,10 @@ def aggregate_month(
     Only runs with every lead time present in both forecast and ERA5 are used.
     """
     fc, obs, obs_present = align(forecast, era5)
-    keep, counts, _ = homogeneous_runs(forecast["present"], obs_present)
+    keep, counts, excluded = homogeneous_runs(forecast["present"], obs_present)
+    runs = pd.DataFrame({"init_time": pd.DatetimeIndex(fc.init_time.values), "status": "included"})
+    runs.loc[~keep.values, "status"] = "era5_missing"
+    runs.loc[runs["init_time"].isin(pd.DatetimeIndex(excluded["forecast_missing"])), "status"] = "forecast_missing"
     if counts["n_runs_included"] == 0:
         raise ValueError(f"No complete runs in {ident['month']}: {counts}")
     fc = fc.isel(init_time=keep.values)
@@ -71,7 +77,7 @@ def aggregate_month(
     region_df = pd.concat(frames, ignore_index=True)
     for key in ("month", "domain", "variable", "model"):
         region_df.insert(0, key, ident[key])
-    return MonthAggregate(stats=stats, regions=region_df, counts=counts)
+    return MonthAggregate(stats=stats, regions=region_df, counts=counts, runs=runs)
 
 
 def validate_aggregate(agg: MonthAggregate, tol: float = 1e-9) -> None:
@@ -100,39 +106,62 @@ def validate_aggregate(agg: MonthAggregate, tol: float = 1e-9) -> None:
         raise ValueError("Region table empty or non-finite")
     if (r["n_forecasts"] != c["n_runs_included"]).any():
         raise ValueError("Region forecast count differs from included runs")
+    status = agg.runs["status"].value_counts()
+    if (len(agg.runs) != c["n_runs_total"] or status.get("included", 0) != c["n_runs_included"]
+            or status.get("forecast_missing", 0) != c["n_excluded_forecast_missing"]
+            or status.get("era5_missing", 0) != c["n_excluded_era5_missing"]
+            or agg.runs["init_time"].duplicated().any()):
+        raise ValueError("Run list does not match the run counts")
     if (r["sum_w"] <= 0).any() or (r["sum_we2"] < 0).any():
         raise ValueError("Region weights/sums out of range")
 
 
-def month_paths(model: str, variable: str, domain: str, month: str) -> tuple[Path, Path]:
-    d = paths.aggregates_dir(model, variable, domain)
+def month_paths(model: str, variable: str, domain: str, month: str,
+                comparison: str | None = None) -> tuple[Path, Path]:
+    d = paths.aggregates_dir(model, variable, domain, comparison)
     return d / f"{month}.nc", d / f"{month}_regions.parquet"
 
 
-def write_aggregate(agg: MonthAggregate, ident: dict[str, str]) -> tuple[Path, Path]:
+def runs_path(model: str, variable: str, domain: str, month: str,
+              comparison: str | None = None) -> Path:
+    return paths.aggregates_dir(model, variable, domain, comparison) / f"{month}_runs.parquet"
+
+
+def write_aggregate(agg: MonthAggregate, ident: dict[str, str],
+                    comparison: str | None = None) -> tuple[Path, Path]:
     """Validate, write to temporary files, re-read and compare, then move into place."""
     validate_aggregate(agg)
-    nc_path, pq_path = month_paths(ident["model"], ident["variable"], ident["domain"], ident["month"])
+    m, v, d, mo = ident["model"], ident["variable"], ident["domain"], ident["month"]
+    nc_path, pq_path = month_paths(m, v, d, mo, comparison)
+    rn_path = runs_path(m, v, d, mo, comparison)
     nc_path.parent.mkdir(parents=True, exist_ok=True)
     nc_tmp, pq_tmp = nc_path.with_suffix(".nc.part"), pq_path.with_suffix(".parquet.part")
+    rn_tmp = rn_path.with_suffix(".parquet.part")
 
     ds = agg.stats.copy()
     ds.attrs.update(ident)
+    if comparison:
+        ds.attrs["comparison"] = comparison
     ds.attrs.update({k: int(v) for k, v in agg.counts.items()})
     ds.to_netcdf(nc_tmp, encoding={v: _NC_ENCODING for v in ds.data_vars})
     agg.regions.to_parquet(pq_tmp, index=False)
+    agg.runs.to_parquet(rn_tmp, index=False)
 
     with xr.open_dataset(nc_tmp) as chk:
         for v in STAT_VARS:
             if not np.array_equal(chk[v].values, agg.stats[v].values):
                 raise ValueError(f"Written file differs from memory for '{v}'")
     pd.testing.assert_frame_equal(pd.read_parquet(pq_tmp), agg.regions, check_dtype=False)
+    pd.testing.assert_frame_equal(pd.read_parquet(rn_tmp), agg.runs, check_dtype=False)
 
+    # Run list first: a month counts as done only once the aggregate and region files exist.
+    os.replace(rn_tmp, rn_path)
     os.replace(nc_tmp, nc_path)
     os.replace(pq_tmp, pq_path)
     return nc_path, pq_path
 
 
-def is_month_done(model: str, variable: str, domain: str, month: str) -> bool:
-    nc, pq = month_paths(model, variable, domain, month)
+def is_month_done(model: str, variable: str, domain: str, month: str,
+                  comparison: str | None = None) -> bool:
+    nc, pq = month_paths(model, variable, domain, month, comparison)
     return nc.exists() and pq.exists()

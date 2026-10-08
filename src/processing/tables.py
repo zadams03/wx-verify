@@ -1,8 +1,11 @@
 """Dashboard tables (SPEC 4.4 items 3–4), built from the monthly aggregates.
 
   data/dashboard/region_monthly.parquet   region sums per model × variable × region × lead × month
-  data/dashboard/coverage.parquet         run inclusion/exclusion counts per month
+  data/dashboard/coverage.parquet         run counts and included init times per month
   data/dashboard/maps/{model}/{variable}/{domain}/{YYYY}.nc   yearly grid sums at native resolution
+
+Each table has a ``comparison`` key: "" for a model's own (standalone) statistics, or
+a name like "gfs_vs_ecmwf" for the paired-run statistics (maps: maps/compare/{name}/…).
 
 Builders read only completed months (aggregate and region file both present), so they
 are safe to run while the pipeline is still writing later months.
@@ -18,6 +21,7 @@ import pandas as pd
 import xarray as xr
 
 from src.processing.metrics import combine_stats
+from src.processing.pairing import comparison_models, paired_source, read_pairings
 from src.utils import paths
 
 logger = logging.getLogger(__name__)
@@ -74,28 +78,81 @@ def _write_parquet(df: pd.DataFrame, out) -> None:
     os.replace(tmp, out)
 
 
+def _paired_months() -> list[tuple[str, str, str, str, dict, str, str | None]]:
+    """(comparison, variable, domain, model, pairing record, month, source) for every
+    paired month whose statistics are on disk; ``source`` is the comparison name when
+    the month has its own paired aggregate, None when the standalone one is used."""
+    from src.processing.aggregate import is_month_done
+    out = []
+    root = paths.DATA_ROOT / "processed" / "aggregates" / "compare"
+    if not root.exists():
+        return out
+    for cdir in sorted(p for p in root.iterdir() if p.is_dir()):
+        comparison = cdir.name
+        for vdir in sorted(p for p in (cdir / "_pairing").glob("*/*") if p.is_dir()):
+            variable, domain = vdir.parent.name, vdir.name
+            for rec in read_pairings(comparison, variable, domain):
+                src = paired_source(rec["identical"], comparison)
+                for model in comparison_models(comparison):
+                    if is_month_done(model, variable, domain, rec["month"], src):
+                        out.append((comparison, variable, domain, model, rec, rec["month"], src))
+    return out
+
+
 def build_region_table() -> pd.DataFrame:
-    """Concatenate every monthly region file into data/dashboard/region_monthly.parquet."""
+    """Concatenate every monthly region file into data/dashboard/region_monthly.parquet.
+
+    Rows with comparison == "" are each model's standalone statistics; the others are
+    the paired-run statistics for that comparison.
+    """
+    from src.processing.aggregate import month_paths
     files = [f.with_name(f"{f.stem}_regions.parquet") for f in _complete_months()]
     if not files:
         raise FileNotFoundError(f"No monthly region files under {_agg_root()}")
-    df = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
-    for col in ("model", "variable", "domain", "region", "month"):
+    frames = [pd.read_parquet(f).assign(comparison="") for f in files]
+    for comparison, variable, domain, model, _, month, src in _paired_months():
+        _, pq = month_paths(model, variable, domain, month, src)
+        frames.append(pd.read_parquet(pq).assign(comparison=comparison))
+    df = pd.concat(frames, ignore_index=True)
+    for col in ("comparison", "model", "variable", "domain", "region", "month"):
         df[col] = df[col].astype("category")
-    df = df.sort_values(["model", "variable", "domain", "region", "lead_time_h", "month"])
+    df = df.sort_values(["comparison", "model", "variable", "domain", "region", "lead_time_h", "month"])
     _write_parquet(df, paths.dashboard_dir() / "region_monthly.parquet")
     return df
 
 
+def _included_init(model: str, variable: str, domain: str, month: str, comparison: str | None):
+    """Included init times of a month as 'YYYY-MM-DDTHH' strings, or None if not recorded."""
+    from src.processing.aggregate import runs_path
+    rp = runs_path(model, variable, domain, month, comparison)
+    if not rp.exists():
+        return None
+    df = pd.read_parquet(rp)
+    return [t.strftime("%Y-%m-%dT%H") for t in df.loc[df["status"] == "included", "init_time"]]
+
+
 def build_coverage_table() -> pd.DataFrame:
+    """Run counts per model and month, with the included init times (so pairing can
+    compare actual run sets). Months without a recorded run list have ``None``.
+
+    Paired rows (comparison != "") list the runs used by the head-to-head: all of them
+    count as included, and ``n_paired`` is that number.
+    """
     rows = []
     for f in _complete_months():
         with xr.open_dataset(f) as ds:
             a = ds.attrs
-            rows.append({k: a[k] for k in ("model", "variable", "domain", "month")}
-                        | {k: int(a[k]) for k in _COUNT_ATTRS})
+            ident = {k: a[k] for k in ("model", "variable", "domain", "month")}
+            rows.append({"comparison": ""} | ident | {k: int(a[k]) for k in _COUNT_ATTRS}
+                        | {"included_init_times": _included_init(*ident.values(), None)})
     if not rows:
         raise FileNotFoundError(f"No monthly aggregates under {_agg_root()}")
+    for comparison, variable, domain, model, rec, month, src in _paired_months():
+        n = rec["n_paired"]
+        rows.append({"comparison": comparison, "model": model, "variable": variable, "domain": domain,
+                     "month": month, "n_runs_total": n, "n_runs_included": n,
+                     "n_excluded_forecast_missing": 0, "n_excluded_era5_missing": 0,
+                     "included_init_times": rec["paired_init_times"]})
     df = pd.DataFrame(rows)
     _write_parquet(df, paths.dashboard_dir() / "coverage.parquet")
     return df
@@ -128,15 +185,21 @@ def build_map_tables(resolution: float) -> list:
     """Sum completed monthly aggregates per year and write float32/zlib map files.
 
     Maps are kept at the native grid; ``resolution`` (config dashboard.map_resolution)
-    must equal it — resolution is never reduced to fit the size budget.
+    must equal it — resolution is never reduced to fit the size budget. Paired-run
+    maps (the head-to-head) are written under maps/compare/{comparison}/….
     """
+    from src.processing.aggregate import month_paths
+    # (comparison, model, variable, domain, year) -> monthly aggregate files
     by_year: dict[tuple, list] = defaultdict(list)
     for f in _complete_months():
         model, variable, domain = f.parts[-4], f.parts[-3], f.parts[-2]
-        by_year[(model, variable, domain, f.stem[:4])].append(f)
+        by_year[("", model, variable, domain, f.stem[:4])].append(f)
+    for comparison, variable, domain, model, _, month, src in _paired_months():
+        by_year[(comparison, model, variable, domain, month[:4])].append(
+            month_paths(model, variable, domain, month, src)[0])
 
     written = []
-    for (model, variable, domain, year), files in sorted(by_year.items()):
+    for (comparison, model, variable, domain, year), files in sorted(by_year.items()):
         parts = []
         n_runs = 0
         for f in files:
@@ -151,8 +214,9 @@ def build_map_tables(resolution: float) -> list:
             )
         total = map_stats(combine_stats(parts)).astype("float32")
         total.attrs = dict(model=model, variable=variable, domain=domain, year=int(year),
-                           n_months=len(files), n_runs_included=n_runs, resolution=native)
-        out_dir = paths.map_dir(model, variable, domain)
+                           n_months=len(files), n_runs_included=n_runs, resolution=native,
+                           comparison=comparison)
+        out_dir = paths.map_dir(model, variable, domain, comparison or None)
         out_dir.mkdir(parents=True, exist_ok=True)
         out = out_dir / f"{year}.nc"
         tmp = out.with_suffix(".nc.part")

@@ -49,6 +49,8 @@ def _load_region_table() -> pd.DataFrame | None:
     if not path.exists():
         return None
     df = pd.read_parquet(path)
+    if "comparison" in df:                     # paired-run rows are for comparison mode only
+        df = df[df["comparison"].astype(str) == ""].drop(columns="comparison")
     for col in ("model", "variable", "domain", "region", "month"):
         df[col] = df[col].astype(str)
     return df
@@ -57,7 +59,12 @@ def _load_region_table() -> pd.DataFrame | None:
 @st.cache_data
 def _load_coverage() -> pd.DataFrame | None:
     path = paths.dashboard_dir() / "coverage.parquet"
-    return pd.read_parquet(path) if path.exists() else None
+    if not path.exists():
+        return None
+    df = pd.read_parquet(path)
+    if "comparison" in df:
+        df = df[df["comparison"] == ""].drop(columns="comparison")
+    return df
 
 
 @st.cache_data
