@@ -230,6 +230,10 @@ with st.sidebar:
 
 st.title("wx-verify — GFS T2m Verification")
 st.caption("GFS 0.25° | 2m Temperature | ERA5 verification | Western Europe")
+st.caption(
+    "Current results cover GFS runs from 1–7 January 2023 only (preview). "
+    "A multi-year version is in development."
+)
 
 if not has_data:
     st.warning(
