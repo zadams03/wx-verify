@@ -26,8 +26,11 @@ def build_skill_curves(
     summary_df: pd.DataFrame,
     region_name: str = "Western Europe",
     lead_times: list[int] | None = None,
+    units: str = "°C",
 ) -> go.Figure:
-    """Plotly line chart of domain-mean RMSE, ACC, and Bias vs lead time.
+    """Plotly line chart of regional RMSE, centred ACC, and Bias vs lead time.
+
+    summary_df: columns lead_time_h, acc_c, rmse, bias (see metrics.region_metrics).
 
     X-axis: logarithmic. Gridlines at every 24h interval within the lead-time range.
     Labels only at the configured lead times.
@@ -39,9 +42,9 @@ def build_skill_curves(
     fig = make_subplots(specs=[[{"secondary_y": True}]])
 
     lt = summary_df["lead_time_h"].tolist()
-    acc = summary_df["acc_mean"].tolist()
-    rmse = summary_df["rmse_mean"].tolist()
-    bias = summary_df["bias_mean"].tolist()
+    acc = summary_df["acc_c"].tolist()
+    rmse = summary_df["rmse"].tolist()
+    bias = summary_df["bias"].tolist()
 
     axis_lead_times = sorted(lead_times or lt)
     tick_text = [f"{h}h" for h in axis_lead_times]
@@ -59,7 +62,7 @@ def build_skill_curves(
     fig.add_trace(
         go.Scatter(
             x=lt, y=acc,
-            name="ACC",
+            name="ACC (centred)",
             mode="lines+markers",
             line=dict(color=_COLOR_ACC, width=2.5),
             marker=dict(size=9, symbol="circle"),
@@ -72,11 +75,11 @@ def build_skill_curves(
     fig.add_trace(
         go.Scatter(
             x=lt, y=rmse,
-            name="RMSE (°C)",
+            name=f"RMSE ({units})",
             mode="lines+markers",
             line=dict(color=_COLOR_RMSE, width=2.5),
             marker=dict(size=9, symbol="circle"),
-            hovertemplate="<b>RMSE</b>: %{y:.2f} °C<extra></extra>",
+            hovertemplate=f"<b>RMSE</b>: %{{y:.2f}} {units}<extra></extra>",
         ),
         secondary_y=True,
     )
@@ -85,11 +88,11 @@ def build_skill_curves(
     fig.add_trace(
         go.Scatter(
             x=lt, y=bias,
-            name="Bias (°C)",
+            name=f"Bias ({units})",
             mode="lines+markers",
             line=dict(color=_COLOR_BIAS, width=2, dash="dash"),
             marker=dict(size=9, symbol="diamond"),
-            hovertemplate="<b>Bias</b>: %{y:+.2f} °C<extra></extra>",
+            hovertemplate=f"<b>Bias</b>: %{{y:+.2f}} {units}<extra></extra>",
         ),
         secondary_y=True,
     )
@@ -164,7 +167,7 @@ def build_skill_curves(
 
     # Right y-axis: RMSE / Bias — includes zero reference line for bias
     fig.update_yaxes(
-        title_text="RMSE / Bias (°C)",
+        title_text=f"RMSE / Bias ({units})",
         title_font=dict(size=13, color=_COLOR_RMSE),
         showgrid=False,
         tickfont=dict(size=12),

@@ -29,7 +29,6 @@ _ACC_SCALE = [
 
 _SCALES = {"rmse": _RMSE_SCALE, "bias": _BIAS_SCALE, "acc": _ACC_SCALE}
 _TITLES = {"rmse": "RMSE", "bias": "Bias", "acc": "ACC Skill"}
-_UNITS = {"rmse": "°C", "bias": "°C", "acc": ""}
 _TICK_FMT = {"rmse": ".2f", "bias": ".2f", "acc": ".2f"}
 
 _GEO_DEFAULTS = dict(
@@ -94,11 +93,13 @@ def build_spatial_map(
     lead_time_h: int,
     region_bounds: dict,
     region_name: str,
+    units: str = "°C",
 ) -> go.Figure:
     """Plotly geographic scatter map of a single metric at a single lead time.
 
     metric_da: DataArray with dims (lead_time, latitude, longitude).
-    metric_name: 'rmse', 'bias', or 'acc'.
+    metric_name: 'rmse', 'bias', or 'acc' (temporal ACC at each grid cell).
+    units: display units for rmse and bias.
     region_bounds: dict with lat_min, lat_max, lon_min, lon_max — highlighted on map.
     """
     da = metric_da.sel(lead_time=lead_time_h, method="nearest")
@@ -113,7 +114,7 @@ def build_spatial_map(
 
     colorscale = _SCALES[metric_name]
     title = _TITLES[metric_name]
-    units = _UNITS[metric_name]
+    units = "" if metric_name == "acc" else units
     cmin, cmax = _color_range(vals_f, metric_name)
 
     hover_unit = f" {units}" if units else ""

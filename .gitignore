@@ -9,3 +9,5 @@ venv/
 .DS_Store
 docs/*.txt
 .claude/settings.local.json
+data/processed/
+logs/

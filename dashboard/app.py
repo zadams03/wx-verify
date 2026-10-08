@@ -1,11 +1,16 @@
-"""wx-verify — Streamlit dashboard entry point (Phase 6, steps 34 & 38)."""
+"""wx-verify — Streamlit dashboard entry point.
+
+Reads only the committed files in data/dashboard/ (SPEC 4.4):
+  region_monthly.parquet  skill curves and metric cards, exact for any month window
+  maps/…/{YYYY}.nc        yearly grid-point sums for the spatial maps
+  coverage.parquet        which runs were verified or excluded
+"""
 from __future__ import annotations
 
-import datetime
 import sys
+from datetime import date
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import streamlit as st
 import xarray as xr
@@ -15,178 +20,80 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from src.processing.metrics import combine_stats, map_metrics, region_metrics
+from src.utils import paths
 from src.utils.config import load_config
 from src.viz.components import (
     inject_card_styles,
-    render_date_range_selector,
     render_lead_time_selector,
     render_map_toggle,
     render_metric_cards,
-    render_region_selector,
+    render_month_range_selector,
 )
 from src.viz.skill_curves import build_skill_curves
 from src.viz.spatial_maps import build_spatial_map
 
-_METRICS_DIR = _REPO_ROOT / "data" / "processed" / "metrics"
-_FORECASTS_DIR = _REPO_ROOT / "data" / "processed" / "forecasts"
-_CLIM_FILE = _REPO_ROOT / "data" / "processed" / "climatology_t2m.nc"
+_ERA5T_WINDOW_DAYS = 100   # ERA5 is preliminary (ERA5T) for roughly the latest 3 months
 
 
 # ---------------------------------------------------------------------------
-# Data loading
+# Data loading — everything comes from data/dashboard/
 # ---------------------------------------------------------------------------
 
 @st.cache_data
-def _load_summary() -> pd.DataFrame | None:
-    path = _METRICS_DIR / "summary.csv"
+def _load_region_table() -> pd.DataFrame | None:
+    path = paths.dashboard_dir() / "region_monthly.parquet"
     if not path.exists():
         return None
-    return pd.read_csv(path)
+    df = pd.read_parquet(path)
+    for col in ("model", "variable", "domain", "region", "month"):
+        df[col] = df[col].astype(str)
+    return df
 
 
 @st.cache_data
-def _load_spatial(name: str) -> xr.DataArray | None:
-    path = _METRICS_DIR / f"{name}.nc"
-    if not path.exists():
-        return None
-    return xr.open_dataset(path)[name]
+def _load_coverage() -> pd.DataFrame | None:
+    path = paths.dashboard_dir() / "coverage.parquet"
+    return pd.read_parquet(path) if path.exists() else None
 
 
 @st.cache_data
-def _load_aligned_all() -> xr.Dataset | None:
-    """Load and concatenate all aligned_*.nc files, sorted by init_time."""
-    files = sorted(_FORECASTS_DIR.glob("aligned_*.nc"))
-    if not files:
-        return None
-    datasets = [xr.open_dataset(f) for f in files]
-    if len(datasets) == 1:
-        return datasets[0]
-    combined = xr.concat(datasets, dim="init_time")
-    return combined.sortby("init_time")
-
-
-@st.cache_data
-def _load_climatology_da() -> xr.DataArray | None:
-    if not _CLIM_FILE.exists():
-        return None
-    return xr.open_dataset(_CLIM_FILE)["t2m"]
-
-
-@st.cache_data(show_spinner="Recomputing metrics for selected period…")
-def _recompute_spatial_for_window(
-    date_start: datetime.date,
-    date_end: datetime.date,
-) -> dict[str, xr.DataArray] | None:
-    """Filter aligned data to [date_start, date_end] and recompute bias/RMSE/ACC maps.
-
-    Returns dict with keys 'bias', 'rmse', 'acc', each a DataArray with dims
-    (lead_time, latitude, longitude), or None if no init_times fall in the window.
-    """
-    aligned = _load_aligned_all()
-    if aligned is None:
-        return None
-
-    t_start = np.datetime64(date_start)
-    t_end = np.datetime64(date_end) + np.timedelta64(1, "D")
-    mask = (aligned.init_time.values >= t_start) & (aligned.init_time.values < t_end)
-    if not mask.any():
-        return None
-
-    subset = aligned.isel(init_time=mask)
-    fc = subset["forecast"]
-    ob = subset["obs"]
-
-    diff = fc - ob
-    bias_da = diff.mean(dim="init_time")
-    rmse_da = np.sqrt((diff ** 2).mean(dim="init_time"))
-
-    clim = _load_climatology_da()
-    if clim is not None:
-        try:
-            from src.processing.climatology import compute_anomaly
-            from src.processing.metrics import compute_acc
-            fc_anom = compute_anomaly(fc, clim)
-            obs_anom = compute_anomaly(ob, clim)
-            acc_da = compute_acc(fc_anom, obs_anom)
-        except Exception:
-            acc_da = xr.full_like(bias_da, fill_value=float("nan"))
-    else:
-        acc_da = xr.full_like(bias_da, fill_value=float("nan"))
-
-    return {"bias": bias_da, "rmse": rmse_da, "acc": acc_da}
-
-
-def _compute_regional_summary(
-    spatial: dict[str, xr.DataArray | None],
-    bounds: dict[str, float],
-    lead_times: list[int],
-) -> pd.DataFrame:
-    """Domain-mean metrics subsetted to region bounding box."""
-    rows = []
-    for lt in lead_times:
-        row: dict = {"lead_time_h": lt}
-        for name in ("bias", "rmse", "acc"):
-            da = spatial.get(name)
-            if da is None:
-                row[f"{name}_mean"] = float("nan")
-                continue
-            subset = da.where(
-                (da.latitude >= bounds["lat_min"])
-                & (da.latitude <= bounds["lat_max"])
-                & (da.longitude >= bounds["lon_min"])
-                & (da.longitude <= bounds["lon_max"]),
-                drop=True,
-            )
-            sel = subset.sel(lead_time=lt, method="nearest")
-            row[f"{name}_mean"] = float(sel.mean(skipna=True))
-        rows.append(row)
-    return pd.DataFrame(rows)
+def _load_map_stats(model: str, variable: str, domain: str, years: tuple[int, ...]) -> xr.Dataset | None:
+    """Sum the yearly map files for ``years`` (sufficient statistics add exactly)."""
+    parts = []
+    for y in years:
+        f = paths.map_dir(model, variable, domain) / f"{y}.nc"
+        if f.exists():
+            with xr.open_dataset(f) as ds:
+                parts.append(ds.load().astype("float64"))
+    return combine_stats(parts) if parts else None
 
 
 # ---------------------------------------------------------------------------
-# Page config
+# Page
 # ---------------------------------------------------------------------------
 
-st.set_page_config(
-    page_title="wx-verify",
-    page_icon="🌤",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-# Inject global styles (once at startup)
-st.markdown(
-    "<style>.block-container { padding-top: 1.5rem; }</style>",
-    unsafe_allow_html=True,
-)
+st.set_page_config(page_title="wx-verify", page_icon="🌤", layout="wide", initial_sidebar_state="expanded")
+st.markdown("<style>.block-container { padding-top: 1.5rem; }</style>", unsafe_allow_html=True)
 inject_card_styles()
 
-
-# ---------------------------------------------------------------------------
-# Config & data
-# ---------------------------------------------------------------------------
-
 cfg = load_config()
-europe_regions = cfg.regions("europe")
+table = _load_region_table()
+coverage = _load_coverage()
 
-summary_df = _load_summary()
-spatial: dict[str, xr.DataArray | None] = {
-    name: _load_spatial(name) for name in ("bias", "rmse", "acc")
-}
-has_data = summary_df is not None
+if table is None or coverage is None:
+    st.title("wx-verify")
+    st.warning(
+        "No dashboard data found in `data/dashboard/`. "
+        "Run `python -m src.pipeline` to produce it.",
+        icon="⚠️",
+    )
+    st.stop()
 
-aligned_ds = _load_aligned_all()
-has_aligned = aligned_ds is not None
-if has_aligned:
-    _init_idx = pd.DatetimeIndex(aligned_ds.init_time.values)
-    data_min_date: datetime.date = _init_idx.normalize().min().date()
-    data_max_date: datetime.date = _init_idx.normalize().max().date()
-else:
-    data_min_date = data_max_date = None
-
+available = set(zip(table["model"], table["variable"], table["domain"]))
 
 # ---------------------------------------------------------------------------
-# Sidebar
+# Sidebar — selectors built from config, limited to what the data contains
 # ---------------------------------------------------------------------------
 
 with st.sidebar:
@@ -194,117 +101,126 @@ with st.sidebar:
     st.caption("NWP Forecast Verification Dashboard")
     st.divider()
 
-    region_name, region_bounds = render_region_selector(europe_regions)
+    models = [m for m in cfg.enabled_models() if any(a[0] == m for a in available)]
+    if not models:
+        st.warning("No enabled model has data.")
+        st.stop()
+    model = st.selectbox("Model", models, format_func=str.upper)
+
+    variables = [v for v in cfg.enabled_variables()
+                 if model in cfg.variables[v].models and (model, v) in {a[:2] for a in available}]
+    variable = st.selectbox("Variable", variables, format_func=lambda v: cfg.variables[v].long_name)
+
+    domains = [d for d in cfg.enabled_domains() if (model, variable, d) in available]
+    domain = st.selectbox("Domain", domains)
+
+    sel = (table.model == model) & (table.variable == variable) & (table.domain == domain)
+    in_table = set(table.loc[sel, "region"])
+    regions = {n: b for n, b in cfg.regions(domain).items() if n in in_table}
+    region_name = st.selectbox("Region", list(regions))
+    b = regions[region_name]
+    region_bounds = {"lat_min": b.lat_min, "lat_max": b.lat_max, "lon_min": b.lon_min, "lon_max": b.lon_max}
 
     st.divider()
-
     map_metric = render_map_toggle()
-
     st.divider()
 
-    if has_aligned:
-        date_start, date_end = render_date_range_selector(data_min_date, data_max_date)
-    else:
-        date_start = date_end = None
-
-    st.markdown("**Model**")
-    st.caption(cfg.enabled_models()[0].upper())
-    st.markdown("**Variable**")
-    st.caption(cfg.variables[cfg.enabled_variables()[0]].long_name)
+    months = sorted(table.loc[sel, "month"].unique())
+    first_month, last_month = render_month_range_selector(months, key=f"months_{model}_{variable}_{domain}")
 
     st.divider()
-    st.caption("v1.1 · October 2026")
+    st.caption("v1.5 · October 2026")
 
+units = cfg.variables[variable].units
+long_name = cfg.variables[variable].long_name
+window = [m for m in months if first_month <= m <= last_month]
 
 # ---------------------------------------------------------------------------
-# Main area
+# Header — states the actual period covered, read from the data
 # ---------------------------------------------------------------------------
 
-st.title("wx-verify — GFS T2m Verification")
-st.caption("GFS 0.25° | 2m Temperature | ERA5 verification | Western Europe")
+cov = coverage[(coverage.model == model) & (coverage.variable == variable) & (coverage.domain == domain)
+               & coverage.month.isin(window)]
+runs_used = int(cov.n_runs_included.sum())
+ex_fc = int(cov.n_excluded_forecast_missing.sum())
+ex_era5 = int(cov.n_excluded_era5_missing.sum())
+
+st.title(f"wx-verify — {model.upper()} {long_name} Verification")
+st.caption(f"{model.upper()} 0.25° | {long_name} | ERA5 verification | {region_name}")
 st.caption(
-    "Current results cover GFS runs from 1–7 January 2023 only (preview). "
-    "A multi-year version is in development."
+    f"Forecasts initialised {first_month} to {last_month} (whole months, 00z and 12z runs): "
+    f"{runs_used:,} runs verified; {ex_fc + ex_era5:,} excluded "
+    f"({ex_fc:,} missing forecast data, {ex_era5:,} missing ERA5 at a valid time)."
 )
 
-if not has_data:
-    st.warning(
-        "No processed metric files found in `data/processed/metrics/`. "
-        "Run the pipeline (Phases 1–5) to populate data.",
-        icon="⚠️",
-    )
-    st.stop()
+versions = cfg.model_versions.get(model, [])
+if versions:
+    win_start = date.fromisoformat(first_month + "-01")
+    win_end = pd.Period(last_month, "M").end_time.date()
+    labels = [
+        f"{v.name} ({v.date}){' — upgrade inside this window' if win_start <= v.date <= win_end else ''}"
+        for v in versions
+    ]
+    st.caption(f"{model.upper()} versions: " + "; ".join(labels))
 
-# Lead time selector
+# ---------------------------------------------------------------------------
+# Metrics for the selected window
+# ---------------------------------------------------------------------------
+
+rows = table[sel & (table.region == region_name) & table.month.isin(window)]
+summary = region_metrics(rows)
+
 lead_time_h = render_lead_time_selector(cfg.lead_times_hours)
-
+st.markdown("---")
+render_metric_cards(summary, lead_time_h, units)
 st.markdown("---")
 
-# Determine whether date filtering is active
-date_filtering_active = (
-    has_aligned
-    and date_start is not None
-    and (date_start != data_min_date or date_end != data_max_date)
-)
-
-# Validate selected window and warn if too small
-if date_filtering_active:
-    t_s = np.datetime64(date_start)
-    t_e = np.datetime64(date_end) + np.timedelta64(1, "D")
-    n_times = int(
-        ((aligned_ds.init_time.values >= t_s) & (aligned_ds.init_time.values < t_e)).sum()
-    )
-    if n_times == 0:
-        st.warning(
-            "No forecast runs fall within the selected date range. "
-            "Showing full-period metrics.",
-            icon="⚠️",
-        )
-        date_filtering_active = False
-    elif n_times < 4:
-        st.warning(
-            f"Only {n_times} forecast run(s) in the selected window — "
-            "statistics may be unreliable with so few samples.",
-            icon="⚠️",
-        )
-
-# Resolve effective spatial source (filtered window or full-period pre-computed files)
-if date_filtering_active:
-    spatial_window = _recompute_spatial_for_window(date_start, date_end)
-    effective_spatial = spatial_window if spatial_window is not None else spatial
-else:
-    effective_spatial = spatial
-
-# Regional summary for selected region and period
-if any(v is not None for v in effective_spatial.values()):
-    region_summary = _compute_regional_summary(
-        effective_spatial, region_bounds, cfg.lead_times_hours
-    )
-else:
-    region_summary = summary_df
-
-# Metric summary cards
-render_metric_cards(region_summary, lead_time_h)
-
-st.markdown("---")
-
-# Two-column layout: skill curves | spatial map — 3:2 gives the chart more breathing room
 col_left, col_right = st.columns([3, 2], gap="medium")
 
 with col_left:
-    fig_curves = build_skill_curves(
-        region_summary,
-        region_name,
-        lead_times=cfg.lead_times_hours,
+    st.plotly_chart(
+        build_skill_curves(summary, region_name, lead_times=cfg.lead_times_hours, units=units),
+        width="stretch",
     )
-    st.plotly_chart(fig_curves, width="stretch")
 
 with col_right:
-    spatial_da = effective_spatial.get(map_metric)
-    if spatial_da is not None:
-        fig_map = build_spatial_map(
-            spatial_da, map_metric, lead_time_h, region_bounds, region_name
-        )
-        st.plotly_chart(fig_map, width="stretch")
+    years = sorted({int(m[:4]) for m in window})
+    stats = _load_map_stats(model, variable, domain, tuple(years))
+    if stats is None:
+        st.info("Spatial map data not available for this period.")
     else:
-        st.info(f"Spatial {map_metric.upper()} data not available.")
+        da = map_metrics(stats)[map_metric]
+        st.plotly_chart(build_spatial_map(da, map_metric, lead_time_h, region_bounds, region_name, units),
+                        width="stretch")
+        year_months = {m for m in months if int(m[:4]) in years}
+        span = f"{years[0]}" if len(years) == 1 else f"{years[0]}–{years[-1]}"
+        if year_months != set(window):
+            st.caption(f"Maps use whole calendar years ({span}); the curves and cards use your selected months.")
+        else:
+            st.caption(f"Map shows {span}, 0.5° cells.")
+        st.caption("Map ACC is the temporal correlation of anomalies at each cell, pooled over its four "
+                   "0.25° points.")
+
+# ---------------------------------------------------------------------------
+# Notes
+# ---------------------------------------------------------------------------
+
+with st.expander("How these numbers are computed"):
+    st.markdown(
+        "- **Truth:** ERA5 reanalysis (0.25°). ERA5 is not an observation; it is a model-assimilated estimate.\n"
+        "- **Regional means** are weighted by cos(latitude) and pooled over all grid points and forecasts "
+        "(RMSE is the root of the pooled weighted mean squared error).\n"
+        "- **ACC** on the curves and cards is the *centred* spatial anomaly correlation, computed for each "
+        "forecast over the region and then averaged over forecasts. Anomalies are relative to the ERA5 "
+        "1991–2020 climatology by calendar month and hour of day. The skill reference line is ACC = 0.6.\n"
+        "- **Same forecasts at every lead time:** a run is used only if every lead time has both a forecast "
+        "and ERA5 data; excluded runs are counted above.\n"
+        f"- **Lead times:** {', '.join(f'{h}h' for h in cfg.lead_times_hours)}."
+    )
+last_day = pd.Period(last_month, "M").end_time.date()
+if (date.today() - last_day).days <= _ERA5T_WINDOW_DAYS:
+    st.info(
+        "The most recent ~3 months of ERA5 are preliminary (ERA5T) and may be revised; "
+        "results for this window can change slightly.",
+        icon="ℹ️",
+    )

@@ -266,6 +266,7 @@ class TestCoarsen:
             coords={"lead_time": [24], "latitude": lats, "longitude": lons},
         )
         c = coarsen_stats(s, 0.5)
+        assert c["n"].dims == ("lead_time", "latitude", "longitude")
         assert list(c.latitude.values) == [35.0, 35.5, 36.0]
         assert list(c.longitude.values) == [0.0, 0.5]
         assert float(c["sum_e"].sum()) == pytest.approx(float(s["sum_e"].sum()))

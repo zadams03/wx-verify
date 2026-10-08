@@ -71,7 +71,8 @@ def coarsen_stats(stats: xr.Dataset, resolution: float) -> xr.Dataset:
     lon = np.floor((stats.longitude.values + resolution / 2) / resolution) * resolution
     s = stats.assign_coords(lat_cell=("latitude", lat), lon_cell=("longitude", lon))
     s = s.groupby("lat_cell").sum().groupby("lon_cell").sum()
-    return s.rename({"lat_cell": "latitude", "lon_cell": "longitude"})
+    s = s.rename({"lat_cell": "latitude", "lon_cell": "longitude"})
+    return s.transpose("lead_time", "latitude", "longitude")
 
 
 def build_map_tables(resolution: float) -> list:

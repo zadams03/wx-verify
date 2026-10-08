@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import date as _date
-
 import pandas as pd
 import streamlit as st
 
@@ -14,7 +12,7 @@ __all__ = [
     "render_lead_time_selector",
     "render_region_selector",
     "render_map_toggle",
-    "render_date_range_selector",
+    "render_month_range_selector",
 ]
 
 # Single CSS block — injected once by inject_card_styles(), not per card.
@@ -79,8 +77,11 @@ def _card(
     )
 
 
-def render_metric_cards(summary_df: pd.DataFrame, lead_time_h: int) -> None:
-    """Render four metric summary cards for the selected lead time."""
+def render_metric_cards(summary_df: pd.DataFrame, lead_time_h: int, units: str = "°C") -> None:
+    """Render four metric summary cards for the selected lead time.
+
+    summary_df: columns lead_time_h, acc_c, rmse, bias (metrics.region_metrics).
+    """
     candidates = summary_df[summary_df["lead_time_h"] == lead_time_h]
     if candidates.empty:
         idx = (summary_df["lead_time_h"] - lead_time_h).abs().idxmin()
@@ -88,21 +89,21 @@ def render_metric_cards(summary_df: pd.DataFrame, lead_time_h: int) -> None:
     else:
         row = candidates.iloc[0]
 
-    acc = float(row["acc_mean"])
-    rmse = float(row["rmse_mean"])
-    bias = float(row["bias_mean"])
+    acc = float(row["acc_c"])
+    rmse = float(row["rmse"])
+    bias = float(row["bias"])
     skilled = acc >= 0.6
 
     c1, c2, c3, c4 = st.columns(4)
 
     with c1:
         st.markdown(
-            _card("ACC", f"{acc:.3f}", sub=f"at {lead_time_h}h lead"),
+            _card("ACC (centred)", f"{acc:.3f}", sub=f"at {lead_time_h}h lead"),
             unsafe_allow_html=True,
         )
     with c2:
         st.markdown(
-            _card("RMSE", f"{rmse:.2f} °C", sub=f"at {lead_time_h}h lead"),
+            _card("RMSE", f"{rmse:.2f} {units}", sub=f"at {lead_time_h}h lead"),
             unsafe_allow_html=True,
         )
     with c3:
@@ -112,7 +113,7 @@ def render_metric_cards(summary_df: pd.DataFrame, lead_time_h: int) -> None:
             else "Near-zero bias"
         )
         st.markdown(
-            _card("Bias", f"{bias:+.2f} °C", sub=bias_desc),
+            _card("Bias", f"{bias:+.2f} {units}", sub=bias_desc),
             unsafe_allow_html=True,
         )
     with c4:
@@ -174,35 +175,21 @@ def render_map_toggle(key: str = "map_metric") -> str:
     return labels[selected]
 
 
-def render_date_range_selector(
-    min_date: _date,
-    max_date: _date,
-    key: str = "date_range",
-) -> tuple[_date, _date]:
-    """Sidebar date range picker bounded by the available aligned data.
+def render_month_range_selector(months: list[str], key: str = "month_range") -> tuple[str, str]:
+    """Month-resolution analysis period. ``months`` are 'YYYY-MM' strings in order.
 
-    Returns (start_date, end_date). During intermediate selection (user has
-    picked start but not end), returns (start, max_date) so the rest of the
-    dashboard stays valid on every rerun.
+    Returns (first_month, last_month), inclusive. With a single month available
+    there is nothing to choose, so it is shown as text.
     """
     st.markdown("**Analysis period**")
-    # Pre-seed session state on first render so the full period is the
-    # default.  Without this, st.date_input falls back to a 7-day window
-    # ending today regardless of the value= argument.
-    if key not in st.session_state:
-        st.session_state[key] = (min_date, max_date)
-    result = st.date_input(
-        "Select date range",
-        min_value=min_date,
-        max_value=max_date,
+    if len(months) == 1:
+        st.caption(months[0])
+        return months[0], months[0]
+    first, last = st.select_slider(
+        "Select months",
+        options=months,
+        value=(months[0], months[-1]),
         key=key,
         label_visibility="collapsed",
     )
-    if isinstance(result, (list, tuple)):
-        if len(result) == 2:
-            return result[0], result[1]
-        if len(result) == 1:
-            return result[0], max_date
-    if hasattr(result, "year"):
-        return result, max_date
-    return min_date, max_date
+    return first, last
