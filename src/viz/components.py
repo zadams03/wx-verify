@@ -7,6 +7,9 @@ import streamlit as st
 __all__ = [
     "CARD_STYLES",
     "TERRAIN_NOTE",
+    "terrain_note",
+    "VARIABLE_NOTES",
+    "freezing_level_note",
     "CENTRED_ACC_NOTE",
     "ERA5_LINEAGE_NOTE",
     "COMPARISON_MAP_VIEWS",
@@ -24,6 +27,55 @@ TERRAIN_NOTE = (
     "so part of the temperature bias and error here reflects terrain representation, "
     "not forecast error."
 )
+
+_TERRAIN_NOTES = {
+    "t2m": TERRAIN_NOTE,
+    "msl": (
+        "Mountain region: mean sea level pressure over high terrain is not measured but extrapolated "
+        "down to sea level, and each model and ERA5 do the reduction differently, so part of the "
+        "pressure bias and error here reflects that reduction, not forecast error."
+    ),
+    "ws10": (
+        "Mountain region: at 0.25° the forecast model and ERA5 represent terrain height and surface "
+        "roughness differently, so part of the 10 m wind speed bias and error here reflects terrain "
+        "representation, not forecast error."
+    ),
+    "frzl": (
+        "Mountain region: the freezing level is expressed above sea level while model and ERA5 terrain "
+        "differ in height at 0.25°, and points where ERA5 has the 0°C level at the surface are excluded, "
+        "so part of the bias and error here reflects terrain representation, not forecast error."
+    ),
+}
+
+
+def terrain_note(variable: str) -> str | None:
+    """Caveat for a mountain region, or None when the variable has none (500 hPa height)."""
+    return _TERRAIN_NOTES.get(variable)
+
+
+# How each variable is verified, shown under "How these numbers are computed".
+VARIABLE_NOTES = {
+    "msl": "Mean sea level pressure is the models' own reduction to sea level, compared with ERA5's.",
+    "z500": "500 hPa geopotential height (metres): the headline measure of large-scale forecast skill.",
+    "ws10": (
+        "10 m wind speed is computed from the u and v components in each forecast and in ERA5 *before* "
+        "verification, so bias and RMSE are for the scalar speed, not the vector. The ACC climatology is "
+        "the mean of ERA5 wind *speed* (not the speed of the mean wind), 1991–2020."
+    ),
+    "frzl": (
+        "Freezing level is the height of the 0°C isotherm above sea level. ERA5 provides it above ground "
+        "and is converted with ERA5 orography. It is verified only where ERA5 puts the 0°C level above "
+        "the surface; points with a sub-zero surface are excluded for each forecast. Because that sample "
+        "varies by point and time, only bias and RMSE are shown (no ACC)."
+    ),
+}
+
+
+def freezing_level_note(masked_fraction: float) -> str:
+    """Sample note for the freezing level, with the excluded share of this region and window."""
+    return (f"Freezing level: {masked_fraction:.1%} of this region's grid-point forecasts are excluded "
+            "because ERA5 has the 0°C level at the surface (sub-zero surface).")
+
 
 CENTRED_ACC_NOTE = (
     "ACC is centred: each forecast's regional mean anomaly is removed before correlating. "
@@ -98,12 +150,19 @@ def _card(
     )
 
 
+# Bias below this size (in the variable's units) is shown as "near zero".
+_NEAR_ZERO_BIAS = {"t2m": 0.05, "msl": 0.05, "z500": 0.5, "ws10": 0.05, "frzl": 5.0}
+_BIAS_WORDS = {"t2m": ("Warm bias", "Cold bias")}
+
+
 def render_metric_cards(summary_df: pd.DataFrame, lead_time_h: int, units: str = "°C",
-                        title: str | None = None) -> None:
-    """Render four metric summary cards for the selected lead time.
+                        title: str | None = None, variable: str = "t2m", has_acc: bool = True) -> None:
+    """Render metric summary cards for the selected lead time.
 
     summary_df: columns lead_time_h, acc_c, rmse, bias (metrics.region_metrics).
     title: heading above the cards (comparison mode shows one row per model).
+    has_acc: False for variables without an ACC score (freezing level): ACC and the
+    skill-threshold card are left out.
     """
     if title:
         st.markdown(f"**{title}**")
@@ -119,47 +178,37 @@ def render_metric_cards(summary_df: pd.DataFrame, lead_time_h: int, units: str =
     bias = float(row["bias"])
     skilled = acc >= 0.6
 
-    c1, c2, c3, c4 = st.columns(4)
+    cols = st.columns(4 if has_acc else 2)
+    c_acc, c_rmse, c_bias, c_skill = cols if has_acc else (None, *cols, None)
 
-    with c1:
-        st.markdown(
-            _card("ACC (centred)", f"{acc:.3f}", sub=f"at {lead_time_h}h lead"),
-            unsafe_allow_html=True,
-        )
-    with c2:
+    if c_acc is not None:
+        with c_acc:
+            st.markdown(
+                _card("ACC (centred)", f"{acc:.3f}", sub=f"at {lead_time_h}h lead"),
+                unsafe_allow_html=True,
+            )
+    with c_rmse:
         st.markdown(
             _card("RMSE", f"{rmse:.2f} {units}", sub=f"at {lead_time_h}h lead"),
             unsafe_allow_html=True,
         )
-    with c3:
-        bias_desc = (
-            "Warm bias" if bias > 0.05
-            else "Cold bias" if bias < -0.05
-            else "Near-zero bias"
-        )
+    with c_bias:
+        high, low = _BIAS_WORDS.get(variable, ("High bias", "Low bias"))
+        near = _NEAR_ZERO_BIAS.get(variable, 0.05)
+        bias_desc = high if bias > near else low if bias < -near else "Near-zero bias"
         st.markdown(
             _card("Bias", f"{bias:+.2f} {units}", sub=bias_desc),
             unsafe_allow_html=True,
         )
-    with c4:
-        if skilled:
-            st.markdown(
-                _card(
-                    "Skill Threshold", "Above",
-                    sub=f"ACC {acc:.3f} ≥ 0.6",
-                    bg="#d4edda", fg="#155724", border="#c3e6cb",
-                ),
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                _card(
-                    "Skill Threshold", "Below",
-                    sub=f"ACC {acc:.3f} < 0.6",
-                    bg="#f8d7da", fg="#721c24", border="#f5c6cb",
-                ),
-                unsafe_allow_html=True,
-            )
+    if c_skill is not None:
+        with c_skill:
+            if skilled:
+                card = _card("Skill Threshold", "Above", sub=f"ACC {acc:.3f} ≥ 0.6",
+                             bg="#d4edda", fg="#155724", border="#c3e6cb")
+            else:
+                card = _card("Skill Threshold", "Below", sub=f"ACC {acc:.3f} < 0.6",
+                             bg="#f8d7da", fg="#721c24", border="#f5c6cb")
+            st.markdown(card, unsafe_allow_html=True)
 
 
 def render_lead_time_selector(lead_times: list[int], key: str = "lt") -> int:
@@ -176,9 +225,9 @@ def render_lead_time_selector(lead_times: list[int], key: str = "lt") -> int:
     return int(selected.replace("h", ""))
 
 
-def render_map_toggle(key: str = "map_metric") -> str:
-    """Toggle for spatial map metric. Returns 'rmse', 'bias', or 'acc'."""
-    labels = {"RMSE": "rmse", "Bias": "bias", "ACC Skill": "acc"}
+def render_map_toggle(key: str = "map_metric", has_acc: bool = True) -> str:
+    """Toggle for spatial map metric. Returns 'rmse', 'bias', or 'acc' (not offered without ACC)."""
+    labels = {"RMSE": "rmse", "Bias": "bias"} | ({"ACC Skill": "acc"} if has_acc else {})
     selected = st.radio(
         "Map view",
         list(labels.keys()),

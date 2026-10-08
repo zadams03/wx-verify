@@ -23,13 +23,14 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from src.data.map_store import MapUnavailable, get_map_file
-from src.processing.metrics import combine_stats, map_metrics, region_metrics
+from src.processing.metrics import combine_stats, map_metrics, masked_fraction, region_metrics
 from src.utils import paths
 from src.utils.config import comparison_models, load_config
 from src.viz.components import (
     CENTRED_ACC_NOTE,
     ERA5_LINEAGE_NOTE,
-    TERRAIN_NOTE,
+    VARIABLE_NOTES,
+    freezing_level_note,
     inject_card_styles,
     render_comparison_map_toggle,
     render_lead_time_selector,
@@ -37,6 +38,7 @@ from src.viz.components import (
     render_map_view_toggle,
     render_metric_cards,
     render_month_range_selector,
+    terrain_note,
 )
 from src.viz.skill_curves import build_comparison_curves, build_skill_curves
 from src.viz.spatial_maps import build_spatial_map, zoom_bounds
@@ -148,6 +150,7 @@ with st.sidebar:
     variables = [v for v in cfg.enabled_variables()
                  if all(m in cfg.variables[v].models and any(k[:2] == (m, v) for k in in_source) for m in shown)]
     variable = st.selectbox("Variable", variables, format_func=lambda v: cfg.variables[v].long_name)
+    has_acc = "acc" in cfg.variables[variable].scores
 
     domains = [d for d in cfg.enabled_domains() if all((m, variable, d) in in_source for m in shown)]
     domain = st.selectbox("Domain", domains)
@@ -163,7 +166,7 @@ with st.sidebar:
     if comparison:
         map_view = render_comparison_map_toggle(*pair)
     else:
-        map_view = render_map_toggle()
+        map_view = render_map_toggle(has_acc=has_acc)
     full_domain = render_map_view_toggle()
     st.divider()
 
@@ -172,7 +175,7 @@ with st.sidebar:
         months, key=f"months_{choice}_{variable}_{domain}")
 
     st.divider()
-    st.caption("v1.6 · October 2026")
+    st.caption("v1.7 · October 2026")
 
 units = cfg.variables[variable].units
 long_name = cfg.variables[variable].long_name
@@ -217,8 +220,8 @@ else:
         f"({ex_fc:,} missing forecast data, {ex_era5:,} missing ERA5 at a valid time)."
     )
 
-if cfg.is_mountain_region(domain, region_name):
-    st.info(TERRAIN_NOTE, icon="⛰️")
+if cfg.is_mountain_region(domain, region_name) and terrain_note(variable):
+    st.info(terrain_note(variable), icon="⛰️")
 
 if comparison:
     def _listed(m: str) -> str:
@@ -245,10 +248,15 @@ for m in shown:
                     & (source.region == region_name) & source.month.isin(window)]
     summaries[m] = region_metrics(m_rows)
 
+if variable == "frzl":
+    window_rows = source[(source.model == model) & (source.variable == variable) & (source.domain == domain)
+                         & (source.region == region_name) & source.month.isin(window)]
+    st.caption(freezing_level_note(masked_fraction(window_rows)))
 lead_time_h = render_lead_time_selector(cfg.lead_times_hours)
 st.markdown("---")
 for m in shown:
-    render_metric_cards(summaries[m], lead_time_h, units, title=m.upper() if comparison else None)
+    render_metric_cards(summaries[m], lead_time_h, units, title=m.upper() if comparison else None,
+                        variable=variable, has_acc=has_acc)
 st.markdown("---")
 
 col_left, col_right = st.columns([3, 2], gap="medium")
@@ -257,9 +265,11 @@ with col_left:
     if comparison:
         fig = build_comparison_curves(summaries, region_name, lead_times=cfg.lead_times_hours, units=units)
     else:
-        fig = build_skill_curves(summaries[model], region_name, lead_times=cfg.lead_times_hours, units=units)
+        fig = build_skill_curves(summaries[model], region_name, lead_times=cfg.lead_times_hours, units=units,
+                                 has_acc=has_acc)
     st.plotly_chart(fig, width="stretch")
-    st.caption(CENTRED_ACC_NOTE)
+    if has_acc:
+        st.caption(CENTRED_ACC_NOTE)
 
 with col_right:
     years = sorted({int(m[:4]) for m in window})
@@ -267,8 +277,13 @@ with col_right:
     view = ({"lat_min": d.lat_min, "lat_max": d.lat_max, "lon_min": d.lon_min, "lon_max": d.lon_max}
             if full_domain else zoom_bounds(region_bounds))
     map_fig = None
-    if comparison:
-        stats = {m: _load_map_stats(m, variable, domain, tuple(years), comparison) for m in pair}
+    try:
+        stats = ({m: _load_map_stats(m, variable, domain, tuple(years), comparison) for m in pair}
+                 if comparison else _load_map_stats(model, variable, domain, tuple(years)))
+    except MapUnavailable as exc:
+        st.warning(f"Map data could not be downloaded: {exc}", icon="⚠️")
+        stats = None
+    if stats is not None and comparison:
         if all(v is not None for v in stats.values()):
             a_name, b_name = (m.upper() for m in pair)
             if map_view in ("rmse_diff", "acc_diff"):
@@ -278,17 +293,16 @@ with col_right:
                 else:
                     da, name = b_metrics["acc"] - a_metrics["acc"], f"ACC {b_name} − {a_name}"
                 map_fig = build_spatial_map(da, map_view, lead_time_h, region_bounds, region_name, units, view,
-                                            title=name, colorbar_note=f"+ = {b_name} more accurate")
+                                            title=name, colorbar_note=f"+ = {b_name} more accurate",
+                                            variable=variable)
             else:
                 which = pair[0] if map_view == "bias:a" else pair[1]
                 map_fig = build_spatial_map(map_metrics(stats[which])["bias"], "bias", lead_time_h,
                                             region_bounds, region_name, units, view,
-                                            title=f"{which.upper()} bias")
-    else:
-        stats = _load_map_stats(model, variable, domain, tuple(years))
-        if stats is not None:
-            map_fig = build_spatial_map(map_metrics(stats)[map_view], map_view, lead_time_h, region_bounds,
-                                        region_name, units, view)
+                                            title=f"{which.upper()} bias", variable=variable)
+    elif stats is not None:
+        map_fig = build_spatial_map(map_metrics(stats)[map_view], map_view, lead_time_h, region_bounds,
+                                    region_name, units, view, variable=variable)
     if map_fig is None:
         st.info("Spatial map data not available for this period.")
     else:
@@ -325,6 +339,7 @@ with st.expander("How these numbers are computed"):
         "and ERA5 data; excluded runs are counted above.\n"
         + ("- **Head-to-head:** only runs verified for both models are used, so both models are scored on "
            "identical initialisations against the same ERA5 fields.\n" if comparison else "")
+        + (f"- **{cfg.variables[variable].long_name}:** {VARIABLE_NOTES[variable]}\n" if variable in VARIABLE_NOTES else "")
         + f"- **Lead times:** {', '.join(f'{h}h' for h in cfg.lead_times_hours)}."
     )
 last_day = pd.Period(last_month, "M").end_time.date()

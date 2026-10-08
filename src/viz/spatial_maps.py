@@ -38,6 +38,13 @@ _DIFF_SCALE = [
     [1.0, "#1b7837"],
 ]
 
+# Bias scales per variable: blue = forecast below ERA5, red = above for temperature and freezing
+# level; other variables use scales that do not read as cold/warm.
+_BIAS_PRESSURE = [[0.0, "#7b3294"], [0.25, "#c2a5cf"], [0.5, "#f7f7f7"], [0.75, "#a6dba0"], [1.0, "#008837"]]
+_BIAS_WIND = [[0.0, "#01665e"], [0.25, "#80cdc1"], [0.5, "#f5f5f5"], [0.75, "#dfc27d"], [1.0, "#8c510a"]]
+_BIAS_SCALES = {"t2m": _BIAS_SCALE, "frzl": _BIAS_SCALE, "msl": _BIAS_PRESSURE, "z500": _BIAS_PRESSURE,
+                "ws10": _BIAS_WIND}
+
 _SCALES = {"rmse": _RMSE_SCALE, "bias": _BIAS_SCALE, "acc": _ACC_SCALE, "rmse_diff": _DIFF_SCALE, "acc_diff": _DIFF_SCALE}
 _TITLES = {"rmse": "RMSE", "bias": "Bias", "acc": "ACC Skill", "rmse_diff": "RMSE difference", "acc_diff": "ACC difference"}
 _TICK_FMT = {"rmse": ".2f", "bias": ".2f", "acc": ".2f", "rmse_diff": "+.2f", "acc_diff": "+.2f"}
@@ -129,6 +136,7 @@ def build_spatial_map(
     view_bounds: dict | None = None,
     title: str | None = None,
     colorbar_note: str | None = None,
+    variable: str = "t2m",
 ) -> go.Figure:
     """Plotly geographic scatter map of a single metric at a single lead time.
 
@@ -142,6 +150,7 @@ def build_spatial_map(
       diverging scale; pass ``title`` (e.g. "RMSE GFS − ECMWF") and ``colorbar_note`` (what
       positive means).
     title: overrides the metric's default name in the figure and colour bar titles.
+    variable: selects the bias colour scale (see _BIAS_SCALES).
     """
     da = metric_da.sel(lead_time=lead_time_h, method="nearest")
 
@@ -161,7 +170,7 @@ def build_spatial_map(
     lons_f = lons[mask]
     vals_f = vals[mask]
 
-    colorscale = _SCALES[metric_name]
+    colorscale = _BIAS_SCALES.get(variable, _BIAS_SCALE) if metric_name == "bias" else _SCALES[metric_name]
     title = title or _TITLES[metric_name]
     units = "" if metric_name in ("acc", "acc_diff") else units
     cmin, cmax = _color_range(vals_f, metric_name)

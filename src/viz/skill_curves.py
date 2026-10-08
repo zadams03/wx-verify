@@ -27,8 +27,10 @@ def build_skill_curves(
     region_name: str = "Western Europe",
     lead_times: list[int] | None = None,
     units: str = "°C",
+    has_acc: bool = True,
 ) -> go.Figure:
     """Plotly line chart of regional RMSE, centred ACC, and Bias vs lead time.
+    With ``has_acc`` False (freezing level) there is no ACC trace, threshold line or ACC axis.
 
     summary_df: columns lead_time_h, acc_c, rmse, bias (see metrics.region_metrics).
 
@@ -59,17 +61,18 @@ def build_skill_curves(
     ]
 
     # ACC — left y-axis
-    fig.add_trace(
-        go.Scatter(
-            x=lt, y=acc,
-            name="ACC (centred)",
-            mode="lines+markers",
-            line=dict(color=_COLOR_ACC, width=2.5),
-            marker=dict(size=9, symbol="circle"),
-            hovertemplate="<b>ACC</b>: %{y:.3f}<extra></extra>",
-        ),
-        secondary_y=False,
-    )
+    if has_acc:
+        fig.add_trace(
+            go.Scatter(
+                x=lt, y=acc,
+                name="ACC (centred)",
+                mode="lines+markers",
+                line=dict(color=_COLOR_ACC, width=2.5),
+                marker=dict(size=9, symbol="circle"),
+                hovertemplate="<b>ACC</b>: %{y:.3f}<extra></extra>",
+            ),
+            secondary_y=False,
+        )
 
     # RMSE — right y-axis
     fig.add_trace(
@@ -97,28 +100,29 @@ def build_skill_curves(
         secondary_y=True,
     )
 
-    # ACC = 0.6 reference line on the left y-axis
-    fig.add_hline(
-        y=0.6,
-        line_color=_COLOR_THRESHOLD,
-        line_width=1.5,
-        line_dash="dot",
-        secondary_y=False,
-    )
-    # Annotation placed in paper-x / data-y coordinates to avoid overlap
-    # with either y-axis label column.
-    fig.add_annotation(
-        text="ACC = 0.6  ",
-        x=0.0,
-        y=0.6,
-        xref="paper",
-        yref="y",
-        showarrow=False,
-        font=dict(size=10, color=_COLOR_THRESHOLD),
-        xanchor="left",
-        yanchor="bottom",
-        bgcolor="rgba(255,255,255,0.75)",
-    )
+    if has_acc:
+        # ACC = 0.6 reference line on the left y-axis
+        fig.add_hline(
+            y=0.6,
+            line_color=_COLOR_THRESHOLD,
+            line_width=1.5,
+            line_dash="dot",
+            secondary_y=False,
+        )
+        # Annotation placed in paper-x / data-y coordinates to avoid overlap
+        # with either y-axis label column.
+        fig.add_annotation(
+            text="ACC = 0.6  ",
+            x=0.0,
+            y=0.6,
+            xref="paper",
+            yref="y",
+            showarrow=False,
+            font=dict(size=10, color=_COLOR_THRESHOLD),
+            xanchor="left",
+            yanchor="bottom",
+            bgcolor="rgba(255,255,255,0.75)",
+        )
 
     # Intermediate gridlines — lighter/thinner than the data-point gridlines.
     # xref="x" on a log axis expects log10 of the data value.
@@ -150,18 +154,19 @@ def build_skill_curves(
         mirror=False,
     )
 
-    # Left y-axis: ACC
+    # Left y-axis: ACC (hidden when the variable has none)
     fig.update_yaxes(
-        title_text="ACC",
+        title_text="ACC" if has_acc else None,
         title_font=dict(size=13, color=_COLOR_ACC),
         range=[-0.05, 1.05],
-        showgrid=True,
+        showgrid=has_acc,
         gridwidth=1,
         gridcolor=_COLOR_GRID,
         tickfont=dict(size=12, color=_COLOR_ACC),
-        showline=True,
+        showline=has_acc,
         linecolor="rgba(100,100,100,0.4)",
         zeroline=False,
+        visible=has_acc,
         secondary_y=False,
     )
 

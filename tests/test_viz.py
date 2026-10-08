@@ -102,3 +102,44 @@ def test_acc_difference_map_is_symmetric_unitless_and_signed():
     assert m.cmin == -m.cmax and m.cmax > 0
     assert "°C" not in m.colorbar.title.text                       # ACC has no units
     assert "+.3f" in fig.data[0].hovertemplate
+
+
+# ---------------------------------------------------------------------------
+# Phase 10: per-variable units, colour scales and notes
+# ---------------------------------------------------------------------------
+
+def _summary():
+    import pandas as pd
+    return pd.DataFrame({"lead_time_h": [24, 48, 72, 120, 240], "acc_c": [.9, .8, .7, .5, .2],
+                         "rmse": [1, 1.5, 2, 3, 5], "bias": [-.1, -.1, 0, .1, .3]})
+
+
+def test_curves_without_acc_have_no_acc_trace_threshold_or_axis():
+    from src.viz.skill_curves import build_skill_curves
+    fig = build_skill_curves(_summary(), "Alps", lead_times=[24, 48, 72, 120, 240], units="m", has_acc=False)
+    assert [t.name for t in fig.data] == ["RMSE (m)", "Bias (m)"]
+    assert not fig.layout.shapes or all(s.y0 != 0.6 for s in fig.layout.shapes)
+    assert not any(a.text == "ACC = 0.6  " for a in fig.layout.annotations)
+    assert fig.layout.yaxis.visible is False
+    with_acc = build_skill_curves(_summary(), "Alps", lead_times=[24, 48, 72, 120, 240])
+    assert [t.name for t in with_acc.data][0] == "ACC (centred)"
+
+
+def test_bias_colour_scale_depends_on_the_variable():
+    def scale(var):
+        return build_spatial_map(_field(), "bias", 24, REGION, "Alps", variable=var).data[0].marker.colorscale
+    assert scale("t2m") == scale("frzl") != scale("ws10") != scale("msl")
+    assert scale("msl") == scale("z500")
+    # unit label comes through
+    fig = build_spatial_map(_field(), "rmse", 24, REGION, "Alps", units="hPa", variable="msl")
+    assert "hPa" in fig.data[0].marker.colorbar.title.text
+
+
+def test_terrain_caveats_cover_temperature_pressure_wind_and_freezing_level_but_not_z500():
+    from src.viz.components import freezing_level_note, terrain_note
+    for v in ("t2m", "msl", "ws10", "frzl"):
+        note = terrain_note(v)
+        assert "Mountain region" in note and "not forecast error" in note
+    assert terrain_note("z500") is None
+    assert "pressure" in terrain_note("msl") and "wind" in terrain_note("ws10")
+    assert "12.5%" in freezing_level_note(0.125)
