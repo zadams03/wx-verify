@@ -35,7 +35,7 @@ def test_repo_config_loads():
     assert cfg.lead_times_hours == [24, 48, 72, 120, 240]
     assert cfg.runs == ["00", "12"]
     assert cfg.enabled_models() == ["gfs", "ecmwf"]
-    assert cfg.enabled_variables() == ["t2m", "msl", "z500", "ws10", "frzl"]
+    assert cfg.enabled_variables() == ["t2m", "msl", "z500", "ws10"]    # frzl withheld from v1.7 (Issue 015)
     assert cfg.enabled_domains() == ["europe", "north_america_west"]
     assert cfg.models["gfs"].start == date(2021, 3, 23)
     assert cfg.models["gfs"].end == date(2026, 9, 20)

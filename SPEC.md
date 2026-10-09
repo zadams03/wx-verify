@@ -476,9 +476,24 @@ Build steps:
 - Freezing level: ERA5 `deg0l` + orography z/g → metres above sea level; points with `deg0l == 0` are NaN (excluded per forecast, counted via `sum_w_all` in the region table). Masked share of region weight over the whole record: Alps 3.8 %, Western Europe 2.9 %, Pacific Northwest 7.0 %, Rockies 18.8 %, Western Canada 24.2 %. GFS is not masked on its side: over sub-zero surfaces GFS reports 0 or a below-ground height, which is why the sample is defined by ERA5.
 - CDS: one request per dataset, level and **year** (all variables of the domain together), split into per-variable monthly raw files; queue time dominated (jobs sat "accepted" for up to ~7 h, and ECMWF MARS errors failed three year jobs). Job ids are stored in `data/raw/era5/{domain}/.jobs/` so a restart attaches instead of resubmitting; a year request that fails twice with a MARS error falls back to months. CDS once returned `deg0l` without the static `geopotential`; the first copy seen is kept in `orography.nc` and used to fill such batches.
 - Pipeline: `python -m src.pipeline` now loops domain → month → variable with all models in one pass and writes paired statistics directly; `--compare` was removed. Existing t2m Europe aggregates and their pairing records were reused unchanged (region rows identical to the Phase 9 table).
-- Map hosting: maps are gitignored; `data/dashboard/maps_manifest.json` (release `maps-20261008`, repo in config) lists 93 files, 144 MB; `src/data/map_store.py` uses a local file or downloads and caches the release asset (SHA-256 checked); `scripts/publish_maps.sh` uploads. The committed-size budget now excludes `maps/`.
+- Map hosting: maps are gitignored; `data/dashboard/maps_manifest.json` (release `maps-20261008`, repo in config) lists 80 files, 134 MB; `src/data/map_store.py` uses a local file or downloads and caches the release asset (SHA-256 checked); `scripts/publish_maps.sh` uploads. The committed-size budget now excludes `maps/`.
 - Run results: every enabled variable × domain × model completed all months (GFS 4,014 of 4,016 runs verified, the two excluded runs being the Issue 009 runs; ECMWF 1,926 of 1,926; paired 1,926).
 - Dashboard additions: per-variable units and bias colour scales, no ACC/skill card for freezing level, terrain caveats for t2m, msl, ws10 and frzl (not z500), freezing-level excluded share, per-variable method notes.
+- **Freezing level withheld from v1.7** (Claude.ai review, 9 Oct): the mask is one-sided (ERA5 only), so GFS 0 / below-ground values stay in the sample and dominate the error in cold regions (Issue 015). `frzl` is disabled in config for v1.7; its aggregates stay on disk; fixed in Phase 10b.
+
+---
+
+### Phase 10b — ERA5 Source Test & Freezing-Level Fix (v1.7.1)
+*Goal: a queue-free ERA5 source if one matches CDS exactly, and a freezing-level sample defined symmetrically by both sources.*
+
+**Learning checkpoint before starting:** Why a one-sided mask biases a verification sample (conditional / selection bias); what GFS `HGT:0C isotherm` vs `HGT:highest tropospheric freezing level` report, and which crossing ERA5 `deg0l` uses when there are several (inversions); geopotential vs geometric height.
+
+Build steps:
+76a. ERA5 source test (report before switching): ARCO-ERA5 (Google Cloud) and/or NSF NCAR ERA5 (AWS) vs the CDS data already used, field for field, for one domain-month: `t2m`, `msl`, z500, `u10`/`v10`, `deg0l`, orography — grid, units, time stamps, max abs difference. Zac decides whether to switch the ERA5 fetcher for Phases 10b–12. If a source lacks `deg0l`, say so.
+76b. Symmetric freezing-level mask: a point/time is excluded if ERA5 `deg0l == 0` **or** the GFS freezing level is at or below GFS surface height (`HGT:surface`, fetched with the same byte-range path). Region tables count the two exclusions separately (ERA5-only, GFS-only, both), and the dashboard's excluded share uses the combined mask.
+76c. Re-run `frzl` for both domains over the full GFS record.
+76d. Sanity checks: per-point bias no longer grows with the masked fraction (binned by masked fraction, Jan and Jul, both domains); summer offset reported; regional bias/RMSE before vs after; independent hand check of one region/month.
+76e. Re-enable `frzl` in config; rebuild tables and maps; new maps release (Zac runs `scripts/publish_maps.sh`); audit; commit "Phase 10b complete — freezing level fix"; tag v1.7.1.
 
 ---
 
@@ -526,8 +541,9 @@ Build steps:
 | 010 | Phase 9 | Committed dashboard data is 35 MB for one variable and one domain (two models + paired). Projected to exceed the 150 MB budget during Phase 10 (4 more variables, second domain) and Phase 12 (6 more GFS years). | Resolved in Phase 10 — map files moved to GitHub Release assets (4.4 item 5) |
 | 011 | Phase 9 | GFS aggregates written before Phase 9 have no run list (`{month}_runs.parquet`) for the 34 months before 2024-02 (2022-11 was re-run and has one). Pairing needs run lists only inside the common period, where they were reconstructed from counts (zero exclusions) or written by the pipeline; the coverage table shows `None` for the older months. | Noted for reference — filled if a month is re-run |
 | 012 | Phase 9 | ECMWF open-data grid: the first three runs (2024-02-01 00z and 12z, 2024-02-02 00z) have 1439 longitude columns (no 179.75°E) instead of 1440. No effect on the `europe` domain (−15°E to 35°E): all three runs were fetched and verified, and the 1439-column layout is covered by a longitude-subset test. | Noted for reference — no action |
-| 013 | Phase 10 | Freezing level: GFS `HGT:0C isotherm` is 0 or below the terrain over sub-zero surfaces and ERA5 `deg0l` is above ground with its own inversion handling, so the two definitions differ in cold, mountainous places. The GFS−ERA5 freezing-level bias is −150 to −230 m in every headline region. Part is terrain mismatch and part is convention; not separated. | Noted for reference |
+| 013 | Phase 10 | Freezing level: GFS `HGT:0C isotherm` is 0 or below the terrain over sub-zero surfaces and ERA5 `deg0l` is above ground with its own inversion handling, so the two definitions differ in cold, mountainous places. The GFS−ERA5 freezing-level bias is −150 to −230 m in every headline region. Part is terrain mismatch and part is convention; not separated. | Revisit after Phase 10b — most of the cold-region bias is Issue 015; a ~−150 m offset remains even in summer with nothing masked |
 | 014 | Phase 10 | CDS reliability: single-level ERA5 requests queued for hours and some year-sized jobs failed with MARS errors; handled by year-sized batching, job-id attach on restart and a month fallback. Wall time for the Phase 10 run was dominated by CDS, not processing. | Noted for reference |
+| 015 | Phase 10 review | Freezing-level mask is one-sided: points are excluded only where ERA5 `deg0l == 0`. Where GFS reports 0 or a below-ground height but ERA5 does not, the point stays in, giving errors of order the terrain height. In the per-point aggregates (Jan 2024, 24h) mean bias grows with the masked fraction: NA −228 m at unmasked points vs −1,186 m at 50–90 % masked points (worst −2,400 m); Europe −194 vs −545 m. July (nothing masked) shows a uniform ~−150 m. The reported masked share counts ERA5 exclusions only. | Open — frzl withheld from v1.7; fix in Phase 10b |
 
 ---
 

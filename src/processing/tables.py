@@ -25,6 +25,7 @@ import xarray as xr
 from src.processing.metrics import combine_stats
 from src.processing.pairing import comparison_models, paired_source, read_pairings
 from src.utils import paths
+from src.utils.config import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -39,11 +40,17 @@ def _agg_root():
     return paths.DATA_ROOT / "processed" / "aggregates"
 
 
+def _enabled_variables() -> set[str]:
+    """Aggregates of a disabled variable stay on disk but stay out of the dashboard tables."""
+    return set(load_config().enabled_variables())
+
+
 def _complete_months() -> list:
-    """Monthly aggregate files whose region file has also been written."""
+    """Monthly aggregate files whose region file has also been written, for enabled variables."""
+    enabled = _enabled_variables()
     return [
         f for f in sorted(_agg_root().glob("*/*/*/*.nc"))
-        if f.with_name(f"{f.stem}_regions.parquet").exists()
+        if f.parts[-3] in enabled and f.with_name(f"{f.stem}_regions.parquet").exists()
     ]
 
 
@@ -88,6 +95,7 @@ def _paired_months() -> list[tuple[str, str, str, str, dict, str, str | None]]:
     the month has its own paired aggregate, None when the standalone one is used."""
     from src.processing.aggregate import is_month_done
     out = []
+    enabled = _enabled_variables()
     root = paths.DATA_ROOT / "processed" / "aggregates" / "compare"
     if not root.exists():
         return out
@@ -95,6 +103,8 @@ def _paired_months() -> list[tuple[str, str, str, str, dict, str, str | None]]:
         comparison = cdir.name
         for vdir in sorted(p for p in (cdir / "_pairing").glob("*/*") if p.is_dir()):
             variable, domain = vdir.parent.name, vdir.name
+            if variable not in enabled:
+                continue
             for rec in read_pairings(comparison, variable, domain):
                 src = paired_source(rec["identical"], comparison)
                 for model in comparison_models(comparison):
