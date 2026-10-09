@@ -210,6 +210,32 @@ class ERA5Fetcher(BaseFetcher):
             request["pressure_level"] = level
         return request
 
+    def _with_orography(self, ds: xr.Dataset, domain: str, members: dict[str, ERA5Field]) -> xr.Dataset:
+        """Make sure surface geopotential ``z`` (static orography) is present when a member needs it.
+
+        CDS sometimes leaves the static ``geopotential`` out of a single-level request (seen when it
+        was requested together with only the zero-degree level). The field never changes, so the
+        first copy seen is kept in orography.nc and used to fill in later batches that lack it.
+        """
+        needs = any("z" in f.short_names and f.level is None for f in members.values())
+        if not needs:
+            return ds
+        store = paths.raw_dir("era5", domain) / "orography.nc"
+        if "z" in ds.data_vars:
+            if not store.exists():
+                tmp = store.with_suffix(".nc.part")
+                ds["z"].isel(valid_time=0, drop=True).to_dataset().to_netcdf(tmp, engine="netcdf4")
+                os.replace(tmp, store)
+            return ds
+        if not store.exists():
+            raise ValueError(f"ERA5 batch has no geopotential (orography) and none is stored for {domain}")
+        with xr.open_dataset(store) as oro:
+            z = oro["z"].load()
+        if not (np.allclose(z.latitude.values, ds.latitude.values) and np.allclose(z.longitude.values, ds.longitude.values)):
+            raise ValueError(f"stored orography grid differs from the batch grid for {domain}")
+        logger.warning("ERA5 batch for %s lacked geopotential — using stored orography", domain)
+        return ds.assign(z=z.broadcast_like(ds["deg0l"]).astype(ds["deg0l"].dtype))
+
     def _fetch_group(self, domain: str, year: int, level: str | None, members: dict[str, ERA5Field],
                      months: list[int], hours: list[int]) -> None:
         """Download ``months`` of one year for all ``members`` and split them into monthly files.
@@ -226,6 +252,7 @@ class ERA5Fetcher(BaseFetcher):
             if "pressure_level" in ds.dims:
                 ds = ds.squeeze("pressure_level", drop=True)
             month_of = pd.DatetimeIndex(ds.valid_time.values).month
+            ds = self._with_orography(ds, domain, members)
             for v, f in members.items():
                 for m in only:
                     sel = np.flatnonzero(month_of == m)

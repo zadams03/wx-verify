@@ -165,3 +165,40 @@ def test_requests_for_later_years_are_submitted_without_waiting_for_earlier_ones
     service.gate.set()
     for fut in futures.values():
         fut.result()
+
+
+def test_batch_without_geopotential_is_completed_from_the_stored_orography(cds, monkeypatch):
+    """CDS once returned deg0l without the static geopotential: the stored orography fills it in."""
+    service = cds(lambda req, n: "ok")
+    f = ERA5Fetcher(CFG)
+    f.ensure_months(["frzl"], "europe", [(2023, 1)], [0, 12])                  # normal batch stores orography.nc
+    assert (f.raw_path("frzl", "europe", 2023, 1).parent / "orography.nc").exists()
+    original = FakeRemote.download
+
+    def no_z(self, target):
+        original(self, target)
+        with xr.open_dataset(target) as ds:
+            ds = ds.drop_vars("z").load()
+        ds.to_netcdf(target)
+        return target
+
+    monkeypatch.setattr(FakeRemote, "download", no_z)
+    f.ensure_months(["frzl"], "europe", [(2023, 2)], [0, 12])
+    with xr.open_dataset(f.raw_path("frzl", "europe", 2023, 2)) as ds:
+        assert set(ds.data_vars) == {"deg0l", "z"} and float(ds.z.mean()) == pytest.approx(1000.0 * GRAVITY)
+
+
+def test_missing_geopotential_without_a_stored_orography_is_an_error(cds, monkeypatch):
+    cds(lambda req, n: "ok")
+    original = FakeRemote.download
+
+    def no_z(self, target):
+        original(self, target)
+        with xr.open_dataset(target) as ds:
+            ds = ds.drop_vars("z").load()
+        ds.to_netcdf(target)
+        return target
+
+    monkeypatch.setattr(FakeRemote, "download", no_z)
+    with pytest.raises(ValueError, match="orography"):
+        ERA5Fetcher(CFG).ensure_months(["frzl"], "europe", [(2023, 1)], [0, 12])
