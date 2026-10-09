@@ -142,16 +142,20 @@ wx-verify/
 │   ├── processed/             ← gitignored
 │   │   ├── aggregates/        ← Monthly sufficient statistics + region sums per model/variable/domain
 │   │   └── climatology/       ← 1991–2020 normal by month and UTC hour, per variable/domain
-│   └── dashboard/             ← Committed. region_monthly.parquet, coverage.parquet, maps/ (see 4.4)
+│   └── dashboard/             ← Committed: region_monthly.parquet, coverage.parquet, maps_manifest.json. maps/ is gitignored (hosted, see 4.4)
 │
 ├── logs/                      ← gitignored. pipeline.log, pid file
 │
+├── scripts/
+│   └── publish_maps.sh        ← Uploads data/dashboard/maps/ to the GitHub Release (run by Zac, asks before uploading)
+│
 ├── src/
-│   ├── pipeline.py            ← Resumable runner CLI (python -m src.pipeline; --compare, --no-tables, --tables-only, --force, --keep-raw)
+│   ├── pipeline.py            ← Resumable runner CLI (python -m src.pipeline; --no-tables, --tables-only, --force, --keep-raw). One pass per domain-month over all variables and models, paired statistics included
 │   ├── data/
 │   │   ├── base_fetcher.py    ← Abstract base class — fetch_month(variable, domain, year, month)
 │   │   ├── byterange.py       ← Shared byte-range fetcher (parallel requests, retries, present mask) for GFS and ECMWF
-│   │   ├── registry.py        ← Variable registry: per-source field names and unit conversions
+│   │   ├── registry.py        ← Variable registry: per-source field names and unit conversions (wind speed from u/v, ERA5 derivations)
+│   │   ├── map_store.py       ← Hosted map files: manifest builder, local-first lookup, cached download from the GitHub Release
 │   │   ├── gfs_fetcher.py     ← GFS archive acquisition (AWS byte-range)
 │   │   ├── gfs_ncar_fetcher.py← GFS long record (NCAR RDA) — Phase 12
 │   │   ├── ecmwf_fetcher.py   ← ECMWF open data (AWS mirror) — Phase 9
@@ -231,7 +235,11 @@ domains:
     regions: {}                 # as Section 3.4
 
 climatology: {source: era5_monthly_by_hour, period: [1991, 2020]}
-dashboard:   {map_resolution: 0.25, committed_size_budget_mb: 150}
+dashboard:
+  map_resolution: 0.25
+  committed_size_budget_mb: 150
+  maps_release_tag: maps-20261008     # GitHub Release holding data/dashboard/maps
+  maps_repo: zadams03/wx-verify
 ```
 
 Per-variable source mappings (GRIB short names, CDS names, unit conversions) live in a variable registry in code, keyed by the config keys above — config chooses *what* runs, the registry knows *how* to fetch each variable from each source.
@@ -256,11 +264,11 @@ Per-variable source mappings (GRIB short names, CDS names, unit conversions) liv
 ### 4.4 Data Storage Design (from Phase 8)
 Goal: least disk space, exact metrics for any date window, and a small committed footprint for Streamlit Cloud.
 
-1. **Raw** (`data/raw/{source}/{domain}/…`, gitignored): only the configured domains, only 00z/12z. GFS global fields are subset to each domain in memory at fetch time. Deleted after aggregation when `keep_raw: false`.
+1. **Raw** (`data/raw/{source}/{domain}/…`, gitignored): only the configured domains, only 00z/12z. GFS global fields are subset to each domain in memory at fetch time. ERA5 files are per variable and month and hold the raw CDS fields the registry names (`u10`+`v10` for ws10, `deg0l`+`z` for frzl); the variables of a domain-month are requested together, one CDS request per dataset and level per **year**, because queue time dominates small requests. Deleted after aggregation when `keep_raw: false`.
 2. **Monthly aggregates** (`data/processed/aggregates/{model}/{variable}/{domain}/{YYYY-MM}.nc`, gitignored): per grid point and lead time, the sufficient statistics — count, Σe, Σe², Σf′, Σo′, Σf′², Σo′², Σf′o′ (e = forecast − ERA5, ′ = anomaly vs climatology); for precipitation, contingency counts (hits, misses, false alarms, correct negatives) per threshold. Any date window's grid-point bias/RMSE/temporal ACC is an exact sum over months.
 3. **Region tables** (`data/dashboard/region_monthly.parquet`, committed): per model × variable × region × lead time × month — area-weighted pooled sums for bias/RMSE, the sum and count of per-forecast spatial ACC, and pooled contingency counts. Skill curves and metric cards are exact for any month window.
 4. **Map tables** (`data/dashboard/maps/…`, committed): grid-point statistics summed per **year** at native 0.25°, float32 + zlib, storing only what the maps need (n, Σe, Σe², Σf′², Σo′², Σf′o′ — n may be stored per lead time if constant). Maps for a selected window use the whole years it covers; the dashboard states this. Resolution is never reduced to meet the budget; map files move to cloud hosting instead. Paired (comparison) map files are written only for years whose paired run set differs from the standalone one; otherwise the dashboard reads the standalone file.
-5. **Size budget and hosting:** committed `data/` ≤ 150 MB. From Phase 10, **map files are hosted as assets on a GitHub Release** (a data release tagged `maps-YYYYMMDD`, independent of code tags), not in git. A committed manifest (`data/dashboard/maps_manifest.json`: release tag, file list, sizes, SHA-256) tells the dashboard what to fetch; it downloads each map file on first use and caches it, using local files when present. Region and coverage tables stay in git.
+5. **Size budget and hosting:** committed `data/dashboard/` (everything except `maps/`) ≤ 150 MB. From Phase 10, **map files are hosted as assets on a GitHub Release** (a data release tagged `maps-YYYYMMDD`, independent of code tags), not in git. A committed manifest (`data/dashboard/maps_manifest.json`: release tag, file list, sizes, SHA-256) tells the dashboard what to fetch; it downloads each map file on first use and caches it, using local files when present. Region and coverage tables stay in git.
 
 Consequences:
 - Adding a **region** to an existing domain needs that domain re-aggregated (re-fetch if raw was deleted). GFS byte-range fetches make this cheap; ECMWF cost checked in Phase 9.

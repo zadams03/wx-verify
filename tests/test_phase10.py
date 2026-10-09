@@ -19,7 +19,7 @@ from src.processing.metrics import masked_fraction
 from src.utils import paths
 from src.utils.config import Bounds, load_config
 from tests.test_pipeline import FakeERA5, FakeGFS, _raw_files, root  # noqa: F401  (fixtures)
-from tests.test_processing import ERA5_TIMES, INITS, LATS, LONS, _clim, _era5, _forecast
+from tests.test_processing import ERA5_TIMES, INITS, _clim, _era5, _forecast
 
 CFG = load_config()
 REGIONS = {"All": Bounds(51.5, 52.0, 0.0, 0.25)}

@@ -274,7 +274,6 @@ def _variable_app(variable: str, region: str = "European Alps", domain: str | No
 
 @pytest.mark.skipif(not _have("frzl"), reason="freezing level not built")
 def test_freezing_level_shows_bias_and_rmse_only():
-    from src.viz.components import freezing_level_note  # noqa: F401
     at = _variable_app("frzl")
     assert next(r for r in at.radio if r.label == "Map view").options == ["RMSE", "Bias"]
     cards = " ".join(m.value for m in at.markdown)

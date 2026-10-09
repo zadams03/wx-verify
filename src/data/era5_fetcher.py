@@ -37,10 +37,6 @@ def _area(bounds) -> list[float]:
     return [bounds.lat_max, bounds.lon_min, bounds.lat_min, bounds.lon_max]
 
 
-def _is_pressure(field: ERA5Field) -> bool:
-    return field.level is not None
-
-
 def derive(ds: xr.Dataset, field: ERA5Field) -> xr.DataArray:
     """Verification field from raw ERA5 variables, in display units (float64).
 
