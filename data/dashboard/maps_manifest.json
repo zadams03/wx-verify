@@ -1,14 +1,8 @@
 {
  "release_tag": "maps-20261008",
  "repo": "zadams03/wx-verify",
- "total_bytes": 145706367,
+ "total_bytes": 143114516,
  "files": [
-  {
-   "path": "compare/gfs_vs_ecmwf/ecmwf/ws10/north_america_west/2026.nc",
-   "asset": "compare__gfs_vs_ecmwf__ecmwf__ws10__north_america_west__2026.nc",
-   "bytes": 1300017,
-   "sha256": "ec2b1131079e27655a11869972e06120eec7ed419bee1a3cf5de8e945d19e07d"
-  },
   {
    "path": "compare/gfs_vs_ecmwf/gfs/msl/europe/2024.nc",
    "asset": "compare__gfs_vs_ecmwf__gfs__msl__europe__2024.nc",
@@ -44,12 +38,6 @@
    "asset": "compare__gfs_vs_ecmwf__gfs__ws10__north_america_west__2024.nc",
    "bytes": 1279188,
    "sha256": "fddc569c01b777b888700d48458cb277ef5652d65e569b5d2aa7e7e1ba49ce8c"
-  },
-  {
-   "path": "compare/gfs_vs_ecmwf/gfs/ws10/north_america_west/2026.nc",
-   "asset": "compare__gfs_vs_ecmwf__gfs__ws10__north_america_west__2026.nc",
-   "bytes": 1291834,
-   "sha256": "c5ff4d5d29cb6251cafc830bfb46dae9b9a35879ab8c0e404f0fbb782176eac8"
   },
   {
    "path": "compare/gfs_vs_ecmwf/gfs/z500/europe/2024.nc",
