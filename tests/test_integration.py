@@ -94,7 +94,8 @@ def test_region_table_matches_grid_statistics():
         bias_grid = float((w * sl["sum_e"]).sum() / (w * sl["n"]).sum())
         rmse_grid = float(np.sqrt((w * sl["sum_e2"]).sum() / (w * sl["n"]).sum()))
         rows = pd.read_parquet(table)
-        rows = rows[(rows.region == "European Alps") & (rows.month == "2023-01")]
+        rows = rows[(rows.region == "European Alps") & (rows.month == "2023-01") & (rows.variable == "t2m")
+                    & (rows.domain == "europe") & (rows.model == "gfs") & (rows.comparison == "")]
         m = metrics.region_metrics(rows).set_index("lead_time_h").loc[lead]
         assert m["bias"] == pytest.approx(bias_grid, abs=1e-9)
         assert m["rmse"] == pytest.approx(rmse_grid, abs=1e-9)
