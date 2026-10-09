@@ -140,7 +140,7 @@ def cds(root, monkeypatch):  # noqa: F811
     """ERA5Fetcher whose CDS calls are recorded and answered with synthetic files."""
     calls = []
 
-    def fake_retrieve(self, dataset, request, out):
+    def fake_retrieve(self, dataset, request, out, **kw):
         calls.append((dataset, tuple(request["variable"]), request.get("pressure_level"),
                       tuple(request["month"])))
         short = {"2m_temperature": "t2m", "mean_sea_level_pressure": "msl",
@@ -217,7 +217,7 @@ def test_freezing_level_file_with_all_masked_data_fails_validation(cds, monkeypa
 def test_hourly_climatology_is_mean_of_speed(root, monkeypatch):  # noqa: F811
     cfg = replace(CFG, climatology=replace(CFG.climatology, period=(2000, 2001)))
 
-    def fake_retrieve(self, dataset, request, out):
+    def fake_retrieve(self, dataset, request, out, **kw):
         year = int(request["year"])
         times = pd.DatetimeIndex([pd.Timestamp(year, m, d, h) for m in range(1, 13)
                                   for d in range(1, calendar.monthrange(year, m)[1] + 1) for h in (0, 12)])
@@ -277,7 +277,7 @@ def test_joint_pass_matches_single_model_processing(joint, root):
         xr.testing.assert_identical(ds.load(), want)
     # the month's own files are gone; ERA5 prefetched for later months is kept for them
     left = _raw_files()
-    assert left and all(f.startswith("era5/") and f[-5:-3] != "01" and "2023-01" not in f for f in left)
+    assert left and all(f.startswith("era5/") and "2023-01" not in f for f in left)
 
 
 def test_joint_pass_pairs_two_models_in_one_pass(joint, root):
@@ -317,7 +317,7 @@ def test_one_failing_variable_does_not_stop_the_others(joint, root, monkeypatch)
 def test_months_of_one_year_share_one_request_and_are_split_into_monthly_files(cds):
     f = ERA5Fetcher(CFG)
     f.ensure_months(["msl"], "europe", [(2023, 1), (2023, 2), (2024, 1)], [0, 12])
-    assert [c[3] for c in cds] == [("01", "02"), ("01",)]          # one request per year
+    assert sorted(c[3] for c in cds) == [("01",), ("01", "02")]          # one request per year
     for y, m, days in ((2023, 1, 31), (2023, 2, 28), (2024, 1, 31)):
         with xr.open_dataset(f.raw_path("msl", "europe", y, m)) as ds:
             times = pd.DatetimeIndex(ds.valid_time.values)
@@ -326,11 +326,8 @@ def test_months_of_one_year_share_one_request_and_are_split_into_monthly_files(c
     assert len(cds) == 2                                           # all cached
 
 
-def test_prefetch_covers_the_rest_of_the_year_but_not_beyond_the_data():
-    cfg = CFG
-    got = pipeline._prefetch_months(cfg, [date(2023, 3, 1), date(2023, 3, 31)], None)
-    assert got[0] == (2023, 3) and got[-1] == (2023, 12) and len(got) == 10
-    last = pipeline._prefetch_months(cfg, [date(2026, 9, 1), date(2026, 9, 20)], None)
-    assert last[-1] == (2026, 9) and (2026, 10) not in last
-    cross = pipeline._prefetch_months(cfg, [date(2023, 12, 1), date(2023, 12, 31)], None)
-    assert (2024, 1) in cross and cross[-1] == (2024, 12)
+def test_prefetch_covers_every_later_month_up_to_the_end_of_the_data():
+    got = pipeline._prefetch_months(CFG, [date(2023, 3, 1), date(2023, 3, 31)], None)
+    assert got[0] == (2023, 3) and got[-1] == (2026, 9) and (2026, 10) not in got
+    assert len(got) == 43 and len({y for y, _ in got}) == 4
+    assert pipeline._prefetch_months(CFG, [date(2026, 9, 1), date(2026, 9, 20)], None) == [(2026, 9)]

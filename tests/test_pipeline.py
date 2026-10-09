@@ -100,10 +100,10 @@ class FakeERA5:
     def fetch_month(self, variable, domain, year, month, hours=None, batch=None):
         return _touch("era5", f"{variable}_{year:04d}-{month:02d}.nc")
 
-    def ensure_months(self, variables, domain, months, hours):
+    def ensure_months(self, variables, domain, months, hours, prefetch=None):
         FakeERA5.batches.append((list(variables), list(months)))
         for v in variables:
-            for y, m in months:
+            for y, m in sorted(set(months) | set(prefetch or [])):
                 _touch("era5", f"{v}_{y:04d}-{m:02d}.nc")
 
     def validate(self, path, variable, domain, year=None, month=None):
