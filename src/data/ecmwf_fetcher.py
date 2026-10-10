@@ -74,6 +74,7 @@ class ECMWFFetcher(ByteRangeFetcher):
 
     model = "ecmwf"
     label = "ECMWF"
+    workers = 3          # 8 workers drew 503 SlowDown on 7-step precipitation months; runs were lost after all retries
 
     def init_dates(self, year: int, month: int) -> list[date]:
         model = self.config.models["ecmwf"]

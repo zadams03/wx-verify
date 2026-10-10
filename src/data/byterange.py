@@ -143,6 +143,7 @@ class ByteRangeFetcher(BaseFetcher):
 
     model: str          # config key and raw directory name
     label: str          # for logs and file attributes
+    workers: int = MAX_WORKERS     # parallel requests (the ECMWF mirror rate-limits with 503 SlowDown)
 
     def init_dates(self, year: int, month: int) -> list[date]:
         raise NotImplementedError
@@ -269,7 +270,7 @@ class ByteRangeFetcher(BaseFetcher):
         """Download ``jobs`` with MAX_WORKERS threads and decode them on this thread
         (ecCodes is not guaranteed thread-safe). Returns {job: exception} for failures."""
         failures: dict = {}
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        with ThreadPoolExecutor(max_workers=self.workers) as pool:
             futures = {pool.submit(self._download_parts, session, job, field): job for job in jobs}
             for fut in as_completed(futures):
                 job = futures[fut]
