@@ -17,7 +17,7 @@ import xarray as xr
 
 from src.data.accumulation import hourly_window_sums
 from src.data.base_fetcher import BaseFetcher
-from src.data.registry import GRAVITY, ERA5Field, get_variable
+from src.data.registry import ERA5_GLACIER_SWE_MM, GRAVITY, ERA5Field, get_variable
 from src.utils import paths
 
 logger = logging.getLogger(__name__)
@@ -78,7 +78,10 @@ def derive(ds: xr.Dataset, field: ERA5Field) -> xr.DataArray:
         deg0l = ds["deg0l"].astype("float64")
         height = deg0l + ds["z"].astype("float64") / GRAVITY
         return height.where(deg0l > 0)
-    return field.conversion.apply(ds[field.short_name].astype("float64"))
+    mm = field.conversion.apply(ds[field.short_name].astype("float64"))
+    if field.derive == "snow":
+        return mm.where(mm < ERA5_GLACIER_SWE_MM - 0.5)
+    return mm
 
 
 def _month_sums(da: xr.DataArray) -> xr.Dataset:

@@ -600,3 +600,13 @@ def test_swe_aggregate_counts_water_points_as_masked_and_scores_the_rest():
     assert r["sum_w_gfs_only"].iloc[0] == pytest.approx(len(inits) * w[1])       # ERA5 has a value there
     assert r["sum_w_era5_only"].iloc[0] == 0 and r["sum_w_both"].iloc[0] == 0
     assert r["sum_w"].iloc[0] + r["sum_w_gfs_only"].iloc[0] == pytest.approx(r["sum_w_all"].iloc[0])
+
+
+def test_era5_glacier_placeholder_is_undefined_and_other_snow_converts_to_mm():
+    from src.data.era5_fetcher import derive
+    ds = xr.Dataset({"sd": (("valid_time", "latitude", "longitude"),
+                            np.array([[[0.0, 0.25], [10.0, 0.0]]], "float32"))},
+                    coords={"valid_time": [pd.Timestamp("2025-01-15")], "latitude": LAT, "longitude": LON})
+    got = derive(ds, get_variable("swe").era5).values[0]
+    assert got[0, 0] == 0.0 and got[0, 1] == pytest.approx(250.0)
+    assert np.isnan(got[1, 0]) and got[1, 1] == 0.0

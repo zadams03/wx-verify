@@ -128,6 +128,8 @@ class AccumulationField:
         return sorted({h for lead in lead_times for h in (lead, lead - self.window_h) if h > 0})
 
 
+ERA5_GLACIER_SWE_MM = 10000.0   # ERA5 snow depth on glaciers is a fixed 10 m of water equivalent (seen in the data)
+
 GRAVITY = 9.80665     # m s⁻², converts ERA5 geopotential (m² s⁻²) to metres
 
 
@@ -138,7 +140,8 @@ class ERA5Field:
     cds_names / short_names: the CDS variables requested and their names inside the file.
     derive: None (first field, converted) | "speed" (√(u²+v²) of the two fields) |
     "freezing_level" (deg0l, height above ground, plus orography z/g → metres above
-    sea level; NaN where deg0l == 0, i.e. the 0°C level is at the surface).
+    sea level; NaN where deg0l == 0, i.e. the 0°C level is at the surface) | "snow" (sd in mm of water;
+    NaN where it equals the 10 m glacier placeholder ERA5 uses, ~127 cells in western North America).
     climatology: "monthly" (CDS monthly-means-by-hour product), "hourly" (computed from
     hourly fields, 1991–2020) or None (no anomalies needed — variable has no ACC).
     """
@@ -268,7 +271,7 @@ VARIABLES: dict[str, VariableSpec] = {
         # GFS WEASD (kg m⁻² = mm) is missing over open water; ERA5 `sd` (m of water equivalent) is defined
         # everywhere (0 over sea). ECMWF open data has `sd` only from 2025-11-20, so ECMWF is parked.
         gfs=GFSField("WEASD", "surface", {"typeOfLevel": "surface"}, "sdwe"),
-        era5=ERA5Field(("snow_depth",), ("sd",), conversion=_M_TO_MM, climatology=None),
+        era5=ERA5Field(("snow_depth",), ("sd",), conversion=_M_TO_MM, climatology=None, derive="snow"),
         mask="undefined",
     ),
     "tp24": VariableSpec(
