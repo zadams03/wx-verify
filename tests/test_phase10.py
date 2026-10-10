@@ -174,9 +174,12 @@ def test_gfs_freezing_level_is_fetched_with_surface_height_from_the_same_idx():
     idx = ("561:1:d=2024011500:HGT:cloud ceiling:24 hour fcst:\n"
            "562:100:d=2024011500:HGT:surface:24 hour fcst:\n"
            "563:250:d=2024011500:HGT:0C isotherm:24 hour fcst:\n"
-           "564:400:d=2024011500:HGT:highest tropospheric freezing level:24 hour fcst:\n")
+           "564:400:d=2024011500:HGT:highest tropospheric freezing level:24 hour fcst:\n"
+           "565:550:d=2024011500:HGT:PV=2e-06 (Km^2/kg/s) surface:24 hour fcst:\n")
     assert find_byte_range(idx, field.surface, 24) == (100, 249)
-    assert find_byte_range(idx, field.level, 24) == (250, 399)
+    # the freezing level is the highest tropospheric one, never the 0C isotherm line beside it
+    assert field.level.idx_level == "highest tropospheric freezing level"
+    assert find_byte_range(idx, field.level, 24) == (400, 549)
     with pytest.raises(ValueError):
         find_byte_range(idx.replace("HGT:surface", "HGT:surface2"), field.surface, 24)
 

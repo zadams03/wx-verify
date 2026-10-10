@@ -19,6 +19,7 @@ import xarray as xr
 
 from src.data.era5_fetcher import ERA5Fetcher, required_hours
 from src.data.gfs_fetcher import GFSFetcher
+from src.data.registry import get_variable
 from src.processing import metrics
 from src.utils import paths
 from src.utils.config import load_config
@@ -99,3 +100,25 @@ def test_region_table_matches_grid_statistics():
         m = metrics.region_metrics(rows).set_index("lead_time_h").loc[lead]
         assert m["bias"] == pytest.approx(bias_grid, abs=1e-9)
         assert m["rmse"] == pytest.approx(rmse_grid, abs=1e-9)
+
+
+@needs_gfs
+def test_gfs_freezing_level_fields_decode_and_match_exactly(tmp_path):
+    """Live check: the highest tropospheric freezing level and the surface height are found by
+    exact .idx match in a real file, decode on the domain grid, and are plausible."""
+    from src.data.byterange import decode_grib
+    from src.data.gfs_fetcher import _download_field
+    field = get_variable("frzl").gfs
+    bounds = CFG.domains["europe"].bounds
+    session = requests.Session()
+    arrays = {}
+    for part in field.parts:
+        content = _download_field(session, date(2024, 1, 15), 0, 24, part)
+        grib = tmp_path / f"{part.idx_level.replace(' ', '_')}.grib2"
+        grib.write_bytes(content)
+        arrays[part.idx_level] = decode_grib(grib, part.grib_filter, part.short_name, bounds)
+    level = arrays["highest tropospheric freezing level"]
+    surface = arrays["surface"]
+    assert level.shape == surface.shape and level.dims == ("latitude", "longitude")
+    assert 0 <= float(level.min()) and float(level.max()) < 8000
+    assert -500 < float(surface.min()) and float(surface.max()) < 6000

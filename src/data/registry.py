@@ -199,7 +199,8 @@ VARIABLES: dict[str, VariableSpec] = {
         key="frzl",
         valid_range=(-1000.0, 10000.0),
         gfs=MaskedLevelField(
-            level=GFSField("HGT", "0C isotherm", {"typeOfLevel": "isothermZero"}, "gh"),
+            level=GFSField("HGT", "highest tropospheric freezing level",
+                           {"typeOfLevel": "highestTroposphericFreezing"}, "gh"),
             surface=GFSField("HGT", "surface", {"typeOfLevel": "surface"}, "orog"),
         ),
         era5=ERA5Field(("zero_degree_level", "geopotential"), ("deg0l", "z"),
