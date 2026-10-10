@@ -4,6 +4,8 @@ One month of raw forecasts + ERA5 becomes
   data/processed/aggregates/{model}/{variable}/{domain}/{YYYY-MM}.nc          grid-point sums
   data/processed/aggregates/{model}/{variable}/{domain}/{YYYY-MM}_regions.parquet  region sums
   data/processed/aggregates/{model}/{variable}/{domain}/{YYYY-MM}_runs.parquet     every scheduled run and its status
+  data/processed/aggregates/{model}/{variable}/{domain}/{YYYY-MM}_categorical.parquet  weighted contingency counts per
+      region × lead × threshold (precipitation only)
 All are validated before they replace any existing file. Paired-run (head-to-head)
 aggregates have the same three files under aggregates/compare/{comparison}/….
 """
@@ -18,6 +20,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from src.processing import categorical
 from src.processing.alignment import align, homogeneous_runs, validate_aligned
 from src.processing.climatology import compute_anomaly
 from src.processing.metrics import (
@@ -38,6 +41,7 @@ class MonthAggregate:
     counts: dict[str, int]     # run inclusion / exclusion counts
     runs: pd.DataFrame         # init_time × status: included | forecast_missing | era5_missing
     masked: bool = False       # sample varies by point/time (freezing level): n may be below the run count
+    categorical: pd.DataFrame | None = None   # weighted contingency counts per region × lead × threshold
 
 
 def aggregate_month(
@@ -47,6 +51,7 @@ def aggregate_month(
     regions: dict[str, Bounds],
     ident: dict[str, str],
     masked: bool = False,
+    thresholds: list[float] | None = None,
 ) -> MonthAggregate:
     """Aggregate one month. ``ident`` supplies model, variable, domain, month (YYYY-MM).
 
@@ -58,6 +63,11 @@ def aggregate_month(
     its level is at or below that are dropped. Dropped points leave every sum; the grid
     statistics keep their count (``n_masked``) and the region table the weight each side
     excluded (ERA5 only / GFS only / both) beside ``sum_w_all``.
+
+    ``thresholds`` (precipitation): contingency counts at those thresholds join the grid statistics
+    (unweighted, with Σforecast and ΣERA5) and, weighted by cos(lat), the ``categorical`` table; the
+    region table gains ``sum_wf`` and ``sum_wo``. The number of window totals that were slightly
+    negative and set to 0 (packing noise) is ``counts['n_clipped']``.
     """
     fc, obs, obs_present = align(forecast, era5)
     keep, counts, excluded = homogeneous_runs(forecast["present"], obs_present)
@@ -69,6 +79,8 @@ def aggregate_month(
     fc = fc.isel(init_time=keep.values)
     obs = obs.isel(init_time=keep.values)
     validate_aligned(fc, obs)
+    if thresholds is not None and "n_clipped" in fc.coords:
+        counts["n_clipped"] = int(fc["n_clipped"].sum())
 
     era5_bad = gfs_bad = None
     if masked:
@@ -84,8 +96,10 @@ def aggregate_month(
         fc_anom = compute_anomaly(fc, clim, fc.valid_time)
         obs_anom = compute_anomaly(obs, clim, obs.valid_time)
     stats = sufficient_stats(fc, obs, fc_anom, obs_anom, excluded=None if not masked else era5_bad | gfs_bad)
+    if thresholds is not None:
+        stats = stats.merge(categorical.grid_statistics(fc, obs, thresholds))
 
-    frames = []
+    frames, cat_frames = [], []
     for name, bounds in regions.items():
         w = region_weights(fc.latitude, fc.longitude, bounds)
         lat_ok = np.flatnonzero((fc.latitude >= bounds.lat_min) & (fc.latitude <= bounds.lat_max))
@@ -95,12 +109,22 @@ def aggregate_month(
         box = dict(latitude=slice(lat_ok[0], lat_ok[-1] + 1), longitude=slice(lon_ok[0], lon_ok[-1] + 1))
         excl = {} if not masked else dict(era5_excluded=era5_bad.isel(box), gfs_excluded=gfs_bad.isel(box))
         df = region_stats(fc.isel(box), obs.isel(box), fc_anom.isel(box), obs_anom.isel(box), w.isel(box), **excl)
+        if thresholds is not None:
+            means, cat = categorical.region_statistics(fc.isel(box), obs.isel(box), w.isel(box), thresholds)
+            for col, values in means.items():
+                df[col] = values
+            cat.insert(0, "region", name)
+            cat_frames.append(cat)
         df.insert(0, "region", name)
         frames.append(df)
     region_df = pd.concat(frames, ignore_index=True)
+    cat_df = pd.concat(cat_frames, ignore_index=True) if cat_frames else None
     for key in ("month", "domain", "variable", "model"):
         region_df.insert(0, key, ident[key])
-    return MonthAggregate(stats=stats, regions=region_df, counts=counts, runs=runs, masked=masked)
+        if cat_df is not None:
+            cat_df.insert(0, key, ident[key])
+    return MonthAggregate(stats=stats, regions=region_df, counts=counts, runs=runs, masked=masked,
+                          categorical=cat_df)
 
 
 def validate_aggregate(agg: MonthAggregate, tol: float = 1e-9) -> None:
@@ -151,6 +175,30 @@ def validate_aggregate(agg: MonthAggregate, tol: float = 1e-9) -> None:
         raise ValueError("Run list does not match the run counts")
     if (r["sum_w"] < 0).any() or (r["sum_we2"] < 0).any() or (not agg.masked and (r["sum_w"] <= 0).any()):
         raise ValueError("Region weights/sums out of range")
+    _validate_categorical(agg)
+
+
+def _validate_categorical(agg: MonthAggregate) -> None:
+    """Contingency counts must add up: per grid point to n, per region and lead time to the valid weight."""
+    cat, s = agg.categorical, agg.stats
+    if (cat is None) != ("hits" not in s):
+        raise ValueError("Grid and region contingency counts must come together")
+    if cat is None:
+        return
+    total = sum(s[c] for c in categorical.COUNT_VARS)
+    if not (total == s["n"]).all():
+        raise ValueError("Grid-point contingency counts do not add up to n")
+    if min(float(s[c].min()) for c in categorical.COUNT_VARS) < 0:
+        raise ValueError("Negative contingency count")
+    cells = cat[list(categorical.REGION_COUNT_COLS)]
+    if not np.isfinite(cells.values).all() or (cells.values < -1e-9).any():
+        raise ValueError("Region contingency counts non-finite or negative")
+    weight = cat.assign(w=cells.sum(axis=1)).merge(
+        agg.regions[["region", "lead_time_h", "sum_w"]], on=["region", "lead_time_h"], how="left")
+    if not np.allclose(weight["w"], weight["sum_w"], rtol=1e-9):
+        raise ValueError("Region contingency weights do not add up to the valid weight sum_w")
+    if not {"sum_wf", "sum_wo"} <= set(agg.regions.columns):
+        raise ValueError("Region table lacks sum_wf / sum_wo")
 
 
 def month_paths(model: str, variable: str, domain: str, month: str,
@@ -164,6 +212,11 @@ def runs_path(model: str, variable: str, domain: str, month: str,
     return paths.aggregates_dir(model, variable, domain, comparison) / f"{month}_runs.parquet"
 
 
+def categorical_path(model: str, variable: str, domain: str, month: str,
+                     comparison: str | None = None) -> Path:
+    return paths.aggregates_dir(model, variable, domain, comparison) / f"{month}_categorical.parquet"
+
+
 def write_aggregate(agg: MonthAggregate, ident: dict[str, str],
                     comparison: str | None = None) -> tuple[Path, Path]:
     """Validate, write to temporary files, re-read and compare, then move into place."""
@@ -174,6 +227,8 @@ def write_aggregate(agg: MonthAggregate, ident: dict[str, str],
     nc_path.parent.mkdir(parents=True, exist_ok=True)
     nc_tmp, pq_tmp = nc_path.with_suffix(".nc.part"), pq_path.with_suffix(".parquet.part")
     rn_tmp = rn_path.with_suffix(".parquet.part")
+    ct_path = categorical_path(m, v, d, mo, comparison)
+    ct_tmp = ct_path.with_suffix(".parquet.part")
 
     ds = agg.stats.copy()
     ds.attrs.update(ident)
@@ -183,6 +238,8 @@ def write_aggregate(agg: MonthAggregate, ident: dict[str, str],
     ds.to_netcdf(nc_tmp, encoding={v: _NC_ENCODING for v in ds.data_vars})
     agg.regions.to_parquet(pq_tmp, index=False)
     agg.runs.to_parquet(rn_tmp, index=False)
+    if agg.categorical is not None:
+        agg.categorical.to_parquet(ct_tmp, index=False)
 
     with xr.open_dataset(nc_tmp) as chk:
         for v in agg.stats.data_vars:
@@ -190,9 +247,14 @@ def write_aggregate(agg: MonthAggregate, ident: dict[str, str],
                 raise ValueError(f"Written file differs from memory for '{v}'")
     pd.testing.assert_frame_equal(pd.read_parquet(pq_tmp), agg.regions, check_dtype=False)
     pd.testing.assert_frame_equal(pd.read_parquet(rn_tmp), agg.runs, check_dtype=False)
+    if agg.categorical is not None:
+        pd.testing.assert_frame_equal(pd.read_parquet(ct_tmp), agg.categorical, check_dtype=False)
 
-    # Run list first: a month counts as done only once the aggregate and region files exist.
+    # Run list and contingency counts first: a month counts as done only once the aggregate and region
+    # files exist.
     os.replace(rn_tmp, rn_path)
+    if agg.categorical is not None:
+        os.replace(ct_tmp, ct_path)
     os.replace(nc_tmp, nc_path)
     os.replace(pq_tmp, pq_path)
     return nc_path, pq_path

@@ -35,6 +35,16 @@ class GFSField:
     grib_filter: dict[str, Any]
     short_name: str
     conversion: UnitConversion = field(default_factory=UnitConversion)
+    # Forecast-step column of the .idx line, formatted with the lead (``{hour}``) and its length in
+    # days (``{day}``). None: the instantaneous "{lead} hour fcst".
+    idx_step: str | None = None
+
+    def step_string(self, lead_h: int) -> str:
+        if self.idx_step is None:
+            return f"{lead_h} hour fcst"
+        if "{day}" in self.idx_step and lead_h % 24:
+            raise ValueError(f"{self.idx_name}: step '{self.idx_step}' needs a lead in whole days, got {lead_h}h")
+        return self.idx_step.format(day=lead_h // 24, hour=lead_h)
 
 
 @dataclass(frozen=True)
@@ -89,6 +99,35 @@ class MaskedLevelField:
         return (self.level, self.surface)
 
 
+@dataclass(frozen=True)
+class AccumulationField:
+    """A model field accumulated from initialisation (precipitation).
+
+    The verified quantity is the ``window_h``-hour total *ending* at each lead time: the accumulation
+    at the lead minus the accumulation ``window_h`` hours earlier (just the accumulation when the lead
+    equals the window). Both GFS (continuous 0→N accumulation) and ECMWF (``tp``) provide that
+    from-initialisation field, so ``field`` names it; the raw file holds it at ``fetch_steps``.
+    """
+
+    field: GFSField | ECMWFField
+    window_h: int = 24
+
+    @property
+    def conversion(self) -> UnitConversion:
+        return self.field.conversion
+
+    @property
+    def parts(self) -> tuple[GFSField | ECMWFField, ...]:
+        return (self.field,)
+
+    def fetch_steps(self, lead_times: list[int]) -> list[int]:
+        """Steps whose accumulation is needed: each lead and the step one window earlier."""
+        bad = [h for h in lead_times if h < self.window_h]
+        if bad:
+            raise ValueError(f"lead times {bad} are shorter than the {self.window_h}h accumulation window")
+        return sorted({h for lead in lead_times for h in (lead, lead - self.window_h) if h > 0})
+
+
 GRAVITY = 9.80665     # m s⁻², converts ERA5 geopotential (m² s⁻²) to metres
 
 
@@ -110,6 +149,10 @@ class ERA5Field:
     level: str | None = None          # pressure level (hPa) → pressure-levels dataset
     derive: str | None = None
     climatology: str | None = "monthly"
+    # Hourly accumulation (precipitation): every hour of the day is fetched, and the verified field
+    # is the total of the ``accumulation_h`` hourly values ending at each valid time (ERA5 stamps
+    # an accumulation with the end of its hour).
+    accumulation_h: int | None = None
 
     @property
     def short_name(self) -> str:
@@ -120,16 +163,22 @@ class ERA5Field:
 class VariableSpec:
     key: str
     valid_range: tuple[float, float]   # plausible values in display units
-    gfs: GFSField | SpeedField | MaskedLevelField | None = None
-    ecmwf: ECMWFField | SpeedField | None = None
+    gfs: GFSField | SpeedField | MaskedLevelField | AccumulationField | None = None
+    ecmwf: ECMWFField | SpeedField | AccumulationField | None = None
     era5: ERA5Field | None = None
+
+    @property
+    def accumulated(self) -> bool:
+        """True for precipitation: forecasts and ERA5 are window totals built from accumulations."""
+        return self.era5 is not None and self.era5.accumulation_h is not None
 
     @property
     def masked(self) -> bool:
         """True when the verification sample varies by point and time (freezing level)."""
         return self.era5 is not None and self.era5.derive == "freezing_level"
 
-    def source_field(self, source: str) -> GFSField | ECMWFField | SpeedField | MaskedLevelField | ERA5Field:
+    def source_field(self, source: str
+                     ) -> GFSField | ECMWFField | SpeedField | MaskedLevelField | AccumulationField | ERA5Field:
         """Return the field definition for ``source`` ('gfs', 'ecmwf' or 'era5')."""
         entry = getattr(self, source, None) if source in ("gfs", "ecmwf", "era5") else None
         if entry is None:
@@ -141,6 +190,7 @@ class VariableSpec:
 
 _KELVIN_TO_CELSIUS = UnitConversion(offset=-273.15)
 _PA_TO_HPA = UnitConversion(scale=0.01)
+_M_TO_MM = UnitConversion(scale=1000.0)
 
 VARIABLES: dict[str, VariableSpec] = {
     "t2m": VariableSpec(
@@ -205,6 +255,18 @@ VARIABLES: dict[str, VariableSpec] = {
         ),
         era5=ERA5Field(("zero_degree_level", "geopotential"), ("deg0l", "z"),
                        derive="freezing_level", climatology=None),
+    ),
+    "tp24": VariableSpec(
+        key="tp24",
+        valid_range=(-1.0, 2500.0),     # mm; the raw files hold accumulations up to 10 days
+        # GFS: the continuous 0→N accumulation, labelled "0-N day acc fcst" at multiples of 24 h
+        # (the 6-hour buckets "{L-6}-{L} hour acc fcst" sit beside it and are not used).
+        gfs=AccumulationField(GFSField("APCP", "surface", {"typeOfLevel": "surface"}, "tp",
+                                       idx_step="0-{day} day acc fcst")),
+        ecmwf=AccumulationField(ECMWFField("tp", "sfc", {"typeOfLevel": "surface"}, "tp",
+                                           conversion=_M_TO_MM)),
+        era5=ERA5Field(("total_precipitation",), ("tp",), conversion=_M_TO_MM,
+                       climatology=None, accumulation_h=24),
     ),
 }
 

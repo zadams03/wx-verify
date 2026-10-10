@@ -112,6 +112,9 @@ class FakeERA5:
     def load(self, path, variable):
         return _era5(ERA5_TIMES, 1.0)
 
+    def load_truth(self, files, variable):
+        return _era5(ERA5_TIMES, 1.0)
+
 
 @pytest.fixture
 def fakes(root, monkeypatch):

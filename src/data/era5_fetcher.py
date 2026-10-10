@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from src.data.accumulation import hourly_window_sums
 from src.data.base_fetcher import BaseFetcher
 from src.data.registry import GRAVITY, ERA5Field, get_variable
 from src.utils import paths
@@ -43,13 +44,19 @@ class JobFailed(RuntimeError):
 
 
 _POOL = ThreadPoolExecutor(max_workers=MAX_CDS_REQUESTS)
-_INFLIGHT: dict[tuple, tuple[set, set, Future]] = {}      # (domain, year, level) -> (names, months, future)
+_INFLIGHT: dict[tuple, tuple[set, set, Future]] = {}      # (domain, year, level, accumulated) -> (names, months, future)
 _LOCK = threading.Lock()
 
 
 def required_hours(runs: list[str], lead_times_hours: list[int]) -> list[int]:
     """UTC hours at which forecasts are valid: (run hour + lead) mod 24."""
     return sorted({(int(r) + h) % 24 for r in runs for h in lead_times_hours})
+
+
+def hours_for(field: ERA5Field, hours: list[int]) -> list[int]:
+    """UTC hours to fetch for a field: the forecasts' valid hours, or every hour of the day for an
+    accumulation (its window totals are built from the hourly values)."""
+    return list(range(24)) if field.accumulation_h else hours
 
 
 def _area(bounds) -> list[float]:
@@ -237,7 +244,7 @@ class ERA5Fetcher(BaseFetcher):
         return ds.assign(z=z.broadcast_like(ds["deg0l"]).astype(ds["deg0l"].dtype))
 
     def _fetch_group(self, domain: str, year: int, level: str | None, members: dict[str, ERA5Field],
-                     months: list[int], hours: list[int]) -> None:
+                     months: list[int], hours: list[int], accumulated: bool = False) -> None:
         """Download ``months`` of one year for all ``members`` and split them into monthly files.
 
         One year-sized request. If its jobs fail twice with a MARS error, each month is requested on
@@ -246,7 +253,26 @@ class ERA5Fetcher(BaseFetcher):
         dataset = _HOURLY_DATASETS[level is not None]
         folder = paths.raw_dir("era5", domain)
 
+        def split_accumulated(tmp: Path, only: list[int]) -> None:
+            """Hourly accumulations: a month at a time from the lazily opened file (a year of hourly
+            fields does not fit comfortably in memory), compressed on disk."""
+            with xr.open_dataset(tmp) as ds:
+                month_of = pd.DatetimeIndex(ds.valid_time.values).month
+                for v, f in members.items():
+                    for m in only:
+                        sel = np.flatnonzero(month_of == m)
+                        if not sel.size:
+                            continue
+                        out = self.raw_path(v, domain, year, m)
+                        part = out.with_suffix(".nc.part")
+                        sub = ds[list(f.short_names)].isel(valid_time=sel)
+                        sub.to_netcdf(part, engine="netcdf4", encoding={
+                            n: {"zlib": True, "complevel": 4, "shuffle": True} for n in f.short_names})
+                        os.replace(part, out)
+
         def split(tmp: Path, only: list[int]) -> None:
+            if accumulated:
+                return split_accumulated(tmp, only)
             with xr.open_dataset(tmp) as ds:
                 ds = ds.load()
             if "pressure_level" in ds.dims:
@@ -263,7 +289,8 @@ class ERA5Fetcher(BaseFetcher):
                     ds[list(f.short_names)].isel(valid_time=sel).to_netcdf(part, engine="netcdf4")
                     os.replace(part, out)
 
-        tmp = folder / f".batch_{year:04d}_{level or 'sfc'}.nc"
+        stem = f".batch_{year:04d}_{level or 'sfc'}" + ("_acc" if accumulated else "")
+        tmp = folder / f"{stem}.nc"
         logger.info("Fetching ERA5 %s %s %04d months %s hours=%s", names, domain, year, months, hours)
         try:
             self._retrieve(dataset, self._request(domain, year, level, names, months, hours), tmp,
@@ -279,7 +306,7 @@ class ERA5Fetcher(BaseFetcher):
             logger.warning("Year request for %s %s %d failed %d times with a MARS error — requesting its "
                            "months one at a time", domain, level or "single", year, exc.failures)
         for m in months:
-            mtmp = folder / f".batch_{year:04d}-{m:02d}_{level or 'sfc'}.nc"
+            mtmp = folder / f"{stem.replace(f'{year:04d}', f'{year:04d}-{m:02d}')}.nc"
             self._retrieve(dataset, self._request(domain, year, level, names, [m], hours), mtmp,
                            max_job_failures=MONTH_JOB_FAILURES)
             try:
@@ -301,22 +328,24 @@ class ERA5Fetcher(BaseFetcher):
         for y, m in months:
             for v in variables:
                 field = get_variable(v).source_field("era5")
-                if not self._is_current(self.raw_path(v, domain, y, m), field, hours):
-                    groups.setdefault((y, field.level), {})[v] = field
-                    wanted.setdefault((y, field.level), set()).add(m)
+                if not self._is_current(self.raw_path(v, domain, y, m), field, hours_for(field, hours)):
+                    gkey = (y, field.level, bool(field.accumulation_h))
+                    groups.setdefault(gkey, {})[v] = field
+                    wanted.setdefault(gkey, set()).add(m)
         futures: dict[tuple, Future] = {}
-        for (y, level), members in groups.items():
+        for (y, level, acc), members in groups.items():
             names = {n for f in members.values() for n in f.cds_names}
-            mons = wanted[(y, level)]
-            key = (domain, y, level)
+            mons = wanted[(y, level, acc)]
+            key = (domain, y, level, acc)
             with _LOCK:
                 held = _INFLIGHT.get(key)
                 if held and not held[2].done() and names <= held[0] and mons <= held[1]:
-                    futures[(y, level)] = held[2]
+                    futures[(y, level, acc)] = held[2]
                     continue
-                fut = _POOL.submit(self._fetch_group, domain, y, level, members, sorted(mons), hours)
+                fut = _POOL.submit(self._fetch_group, domain, y, level, members, sorted(mons),
+                                   list(range(24)) if acc else hours, acc)
                 _INFLIGHT[key] = (names, set(mons), fut)
-                futures[(y, level)] = fut
+                futures[(y, level, acc)] = fut
         return futures
 
     def ensure_months(self, variables: list[str], domain: str, months: list[tuple[int, int]],
@@ -325,13 +354,14 @@ class ERA5Fetcher(BaseFetcher):
 
         ``prefetch`` months (later years) are submitted at the same time so their requests queue in
         CDS while earlier ones are processed. CDS queue time dominates small requests, hence one
-        request per year, dataset and level.
+        request per year, dataset and level (accumulated fields, which CDS returns as a separate
+        file per time-step type, are requested on their own).
         """
         futures = self.start_months(variables, domain, sorted(set(months) | set(prefetch or [])), hours)
-        needed = {(y, get_variable(v).source_field("era5").level) for y, m in months for v in variables
-                  if not self._is_current(self.raw_path(v, domain, y, m),
-                                          get_variable(v).source_field("era5"), hours)}
-        for key in sorted(needed, key=lambda k: (k[0], k[1] or "")):
+        fields = {v: get_variable(v).source_field("era5") for v in variables}
+        needed = {(y, fields[v].level, bool(fields[v].accumulation_h)) for y, m in months for v in variables
+                  if not self._is_current(self.raw_path(v, domain, y, m), fields[v], hours_for(fields[v], hours))}
+        for key in sorted(needed, key=lambda k: (k[0], k[1] or "", k[2])):
             fut = futures.get(key)
             if fut is None:
                 continue
@@ -471,10 +501,24 @@ class ERA5Fetcher(BaseFetcher):
             if np.nanmin(conv) < lo or np.nanmax(conv) > hi:
                 raise ValueError(f"{path.name}: values outside plausible range [{lo}, {hi}]")
 
+    def load_truth(self, files: list[Path], variable: str) -> xr.DataArray:
+        """ERA5 verification field over consecutive monthly files, DataArray(time, lat, lon).
+
+        For an accumulated variable the hourly values are summed into the window ending at each
+        valid-time hour (see accumulation.hourly_window_sums); windows with a missing hour are dropped.
+        """
+        obs = xr.concat([self.load(p, variable) for p in files], dim="time")
+        field = get_variable(variable).source_field("era5")
+        if field.accumulation_h:
+            cfg = self.config
+            obs = hourly_window_sums(obs, required_hours(cfg.runs, cfg.lead_times_hours), field.accumulation_h)
+        return obs
+
     def load(self, path: Path, variable: str) -> xr.DataArray:
         """Return ERA5 as DataArray(time, latitude, longitude) in display units.
 
-        The freezing level is NaN where the 0°C level is at the surface."""
+        The freezing level is NaN where the 0°C level is at the surface. An accumulated variable
+        (precipitation) is returned as the hourly values; see load_truth for window totals."""
         field = get_variable(variable).source_field("era5")
         with xr.open_dataset(path) as ds:
             da = derive(ds.load(), field)

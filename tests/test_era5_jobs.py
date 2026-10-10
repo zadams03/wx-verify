@@ -145,7 +145,7 @@ def test_the_same_year_is_never_submitted_twice_while_outstanding(cds):
     f = ERA5Fetcher(CFG)
     a = f.start_months(["msl", "ws10"], "europe", [(2023, 1), (2023, 2), (2024, 1)], [0, 12])
     b = f.start_months(["msl"], "europe", [(2023, 1)], [0, 12])               # asks for a subset of what is queued
-    assert b[(2023, None)] is a[(2023, None)]
+    assert b[(2023, None, False)] is a[(2023, None, False)]
     service.gate.set()
     for fut in {**a}.values():
         fut.result()

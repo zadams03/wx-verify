@@ -24,7 +24,6 @@ import time
 from datetime import date
 
 import pandas as pd
-import xarray as xr
 
 from src.data.base_fetcher import BaseFetcher
 from src.data.ecmwf_fetcher import ECMWFFetcher
@@ -61,6 +60,11 @@ def ensure_climatology(cfg: Config, variable: str, domain: str):
             clim = build_climatology(era5.fetch_climatology(variable, domain), variable)
         save_climatology(clim, variable, domain)
     return load_climatology(variable, domain)
+
+
+def _thresholds(cfg: Config, variable: str) -> list[float] | None:
+    """Event thresholds for a variable verified by contingency counts (precipitation), else None."""
+    return cfg.variables[variable].thresholds if "ets" in cfg.variables[variable].scores else None
 
 
 def era5_months(init_dates: list[date], lead_times: list[int]) -> list[tuple[int, int]]:
@@ -153,10 +157,10 @@ def process_month(
         p = era5.fetch_month(variable, domain, y, m, hours=hours, batch=batch)
         _validated(era5, p, variable, domain, y, m)
         era5_files.append(p)
-    obs = xr.concat([era5.load(p, variable) for p in era5_files], dim="time")
+    obs = era5.load_truth(era5_files, variable)
 
     agg = aggregate_month(forecast, obs, clim, cfg.domains[domain].regions, ident,
-                          masked=get_variable(variable).masked)
+                          masked=get_variable(variable).masked, thresholds=_thresholds(cfg, variable))
     write_aggregate(agg, ident)
     logger.info("Aggregated %s %s %s %s: %s", model, variable, domain, label, agg.counts)
 
@@ -233,7 +237,7 @@ def _write_comparison_month(cfg, comparison, models, fetchers, variable, domain,
         p = era5.fetch_month(variable, domain, y, m, hours=hours, batch=batch)
         _validated(era5, p, variable, domain, y, m)
         era5_files.append(p)
-    obs = xr.concat([era5.load(p, variable) for p in era5_files], dim="time")
+    obs = era5.load_truth(era5_files, variable)
 
     for m in models:
         f = fetchers[m]
@@ -243,7 +247,7 @@ def _write_comparison_month(cfg, comparison, models, fetchers, variable, domain,
         forecast = forecast.sel(init_time=paired.values.astype("datetime64[ns]"))
         ident = {"model": m, "variable": variable, "domain": domain, "month": label}
         agg = aggregate_month(forecast, obs, clim, cfg.domains[domain].regions, ident,
-                              masked=get_variable(variable).masked)
+                              masked=get_variable(variable).masked, thresholds=_thresholds(cfg, variable))
         write_aggregate(agg, ident, comparison=comparison)
         logger.info("Aggregated %s %s %s %s %s (paired): %s", comparison, m, variable, domain, label, agg.counts)
 

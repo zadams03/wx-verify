@@ -37,8 +37,9 @@ if sys.platform == "win32":
 
 import cfgrib  # noqa: E402
 
+from src.data.accumulation import window_totals
 from src.data.base_fetcher import BaseFetcher
-from src.data.registry import MaskedLevelField, get_variable
+from src.data.registry import AccumulationField, MaskedLevelField, get_variable
 from src.utils import paths
 
 logger = logging.getLogger(__name__)
@@ -136,6 +137,8 @@ class ByteRangeFetcher(BaseFetcher):
       present (init_time, lead_time) int8 — 0 where the file could not be fetched
       surface (init_time, lead_time, latitude, longitude) float32, source units — only for
               fields masked against the model's surface height (freezing level)
+    For an accumulated field (precipitation) lead_time holds the steps whose accumulation is needed
+    (each lead and the step a window earlier); ``load`` turns them into window totals at the leads.
     """
 
     model: str          # config key and raw directory name
@@ -154,6 +157,12 @@ class ByteRangeFetcher(BaseFetcher):
     def raw_path(self, variable: str, domain: str, year: int, month: int) -> Path:
         return paths.raw_dir(self.model, domain) / f"{variable}_{year:04d}-{month:02d}.nc"
 
+    def fetch_steps(self, field) -> list[int]:
+        """Forecast steps stored in the raw file: the configured leads, or for an accumulated
+        field the steps whose accumulations make up the window totals at those leads."""
+        leads = list(self.config.lead_times_hours)
+        return field.fetch_steps(leads) if isinstance(field, AccumulationField) else leads
+
     def fetch_month(self, variable: str, domain: str, year: int, month: int,
                     init_dates: list[date] | None = None) -> Path:
         out = self.raw_path(variable, domain, year, month)
@@ -168,7 +177,7 @@ class ByteRangeFetcher(BaseFetcher):
         if not dates:
             raise ValueError(f"No {self.label} init dates in {year}-{month:02d} within configured sources")
         runs = [int(r) for r in cfg.runs]
-        leads = cfg.lead_times_hours
+        leads = self.fetch_steps(field)
         jobs = [(d, r, h) for d in dates for r in runs for h in leads]
 
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -277,9 +286,10 @@ class ByteRangeFetcher(BaseFetcher):
     def validate(self, path: Path, variable: str, domain: str) -> None:
         cfg = self.config
         spec = get_variable(variable)
+        steps = self.fetch_steps(spec.source_field(self.model))
         with xr.open_dataset(path) as ds:
-            if list(ds.lead_time.values) != list(cfg.lead_times_hours):
-                raise ValueError(f"{path.name}: lead times {list(ds.lead_time.values)} != config")
+            if list(ds.lead_time.values) != steps:
+                raise ValueError(f"{path.name}: lead times {list(ds.lead_time.values)} != expected {steps}")
             b = cfg.domains[domain].bounds
             if (ds.latitude.min() < b.lat_min or ds.latitude.max() > b.lat_max
                     or ds.longitude.min() < b.lon_min or ds.longitude.max() > b.lon_max):
@@ -304,12 +314,17 @@ class ByteRangeFetcher(BaseFetcher):
 
     def load(self, path: Path, variable: str) -> xr.DataArray:
         """Return forecasts in display units with a ``present`` (init, lead) coord, and a
-        ``surface_height`` coord (same dims as the data) for fields masked against it."""
-        conv = get_variable(variable).source_field(self.model).conversion
+        ``surface_height`` coord (same dims as the data) for fields masked against it.
+
+        Accumulated fields come back as window totals at the configured leads, with an ``n_clipped``
+        (init, lead) coord: the grid points whose slightly negative total was set to 0."""
+        field = get_variable(variable).source_field(self.model)
         with xr.open_dataset(path) as ds:
             ds = ds.load()
-        da = conv.apply(ds["data"].astype("float64")).astype("float32")
+        da = field.conversion.apply(ds["data"].astype("float64")).astype("float32")
         da = da.assign_coords(present=(("init_time", "lead_time"), ds["present"].values.astype(bool)))
+        if isinstance(field, AccumulationField):
+            da, _ = window_totals(da, list(self.config.lead_times_hours), field.window_h)
         if "surface" in ds:
             da = da.assign_coords(surface_height=ds["surface"].astype("float32"))
         da.attrs.update(source=self.label, variable=variable)

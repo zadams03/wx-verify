@@ -29,11 +29,12 @@ def _aws_urls(init_date: date, run_hour: int, lead_h: int) -> tuple[str, str]:
 def find_byte_range(idx_text: str, field: GFSField, lead_h: int) -> tuple[int, int | None]:
     """Parse a GFS .idx file and return the (start, end) byte range of one field.
 
-    Fields are matched on exact name, level and forecast-hour strings — e.g.
-    'TMP' / '2 m above ground' must not match 'TMP:2 mb' or 'APTMP'.
+    Fields are matched on exact name, level and forecast-step strings — e.g.
+    'TMP' / '2 m above ground' must not match 'TMP:2 mb' or 'APTMP', and '0-1 day acc fcst'
+    must not match '0-10 day acc fcst'.
     """
     lines = idx_text.strip().splitlines()
-    step = f"{lead_h} hour fcst"
+    step = field.step_string(lead_h)
     for i, line in enumerate(lines):
         parts = line.split(":")
         if (
