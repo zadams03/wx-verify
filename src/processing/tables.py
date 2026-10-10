@@ -25,7 +25,7 @@ import xarray as xr
 from src.processing.metrics import combine_stats
 from src.processing.pairing import comparison_models, paired_source, read_pairings
 from src.utils import paths
-from src.utils.config import load_config
+from src.utils.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -40,14 +40,10 @@ def _agg_root():
     return paths.DATA_ROOT / "processed" / "aggregates"
 
 
-def _enabled_variables() -> set[str]:
-    """Aggregates of a disabled variable stay on disk but stay out of the dashboard tables."""
-    return set(load_config().enabled_variables())
-
-
-def _complete_months() -> list:
+def _complete_months(cfg: Config) -> list:
     """Monthly aggregate files whose region file has also been written, for enabled variables."""
-    enabled = _enabled_variables()
+    # Aggregates of a disabled variable stay on disk but stay out of the dashboard tables.
+    enabled = set(cfg.enabled_variables())
     return [
         f for f in sorted(_agg_root().glob("*/*/*/*.nc"))
         if f.parts[-3] in enabled and f.with_name(f"{f.stem}_regions.parquet").exists()
@@ -89,13 +85,13 @@ def _write_parquet(df: pd.DataFrame, out) -> None:
     os.replace(tmp, out)
 
 
-def _paired_months() -> list[tuple[str, str, str, str, dict, str, str | None]]:
+def _paired_months(cfg: Config) -> list[tuple[str, str, str, str, dict, str, str | None]]:
     """(comparison, variable, domain, model, pairing record, month, source) for every
     paired month whose statistics are on disk; ``source`` is the comparison name when
     the month has its own paired aggregate, None when the standalone one is used."""
     from src.processing.aggregate import is_month_done
     out = []
-    enabled = _enabled_variables()
+    enabled = set(cfg.enabled_variables())
     root = paths.DATA_ROOT / "processed" / "aggregates" / "compare"
     if not root.exists():
         return out
@@ -113,18 +109,18 @@ def _paired_months() -> list[tuple[str, str, str, str, dict, str, str | None]]:
     return out
 
 
-def build_region_table() -> pd.DataFrame:
+def build_region_table(cfg: Config) -> pd.DataFrame:
     """Concatenate every monthly region file into data/dashboard/region_monthly.parquet.
 
     Rows with comparison == "" are each model's standalone statistics; the others are
     the paired-run statistics for that comparison.
     """
     from src.processing.aggregate import month_paths
-    files = [f.with_name(f"{f.stem}_regions.parquet") for f in _complete_months()]
+    files = [f.with_name(f"{f.stem}_regions.parquet") for f in _complete_months(cfg)]
     if not files:
         raise FileNotFoundError(f"No monthly region files under {_agg_root()}")
     frames = [pd.read_parquet(f).assign(comparison="") for f in files]
-    for comparison, variable, domain, model, _, month, src in _paired_months():
+    for comparison, variable, domain, model, _, month, src in _paired_months(cfg):
         _, pq = month_paths(model, variable, domain, month, src)
         frames.append(pd.read_parquet(pq).assign(comparison=comparison))
     df = pd.concat(frames, ignore_index=True)
@@ -145,7 +141,7 @@ def _included_init(model: str, variable: str, domain: str, month: str, compariso
     return [t.strftime("%Y-%m-%dT%H") for t in df.loc[df["status"] == "included", "init_time"]]
 
 
-def build_coverage_table() -> pd.DataFrame:
+def build_coverage_table(cfg: Config) -> pd.DataFrame:
     """Run counts per model and month, with the included init times (so pairing can
     compare actual run sets). Months without a recorded run list have ``None``.
 
@@ -153,7 +149,7 @@ def build_coverage_table() -> pd.DataFrame:
     count as included, and ``n_paired`` is that number.
     """
     rows = []
-    for f in _complete_months():
+    for f in _complete_months(cfg):
         with xr.open_dataset(f) as ds:
             a = ds.attrs
             ident = {k: a[k] for k in ("model", "variable", "domain", "month")}
@@ -161,7 +157,7 @@ def build_coverage_table() -> pd.DataFrame:
                         | {"included_init_times": _included_init(*ident.values(), None)})
     if not rows:
         raise FileNotFoundError(f"No monthly aggregates under {_agg_root()}")
-    for comparison, variable, domain, model, rec, month, src in _paired_months():
+    for comparison, variable, domain, model, rec, month, src in _paired_months(cfg):
         n = rec["n_paired"]
         rows.append({"comparison": comparison, "model": model, "variable": variable, "domain": domain,
                      "month": month, "n_runs_total": n, "n_runs_included": n,
@@ -195,7 +191,7 @@ def map_stats(total: xr.Dataset) -> xr.Dataset:
     return out
 
 
-def build_map_tables(resolution: float) -> list:
+def build_map_tables(cfg: Config, resolution: float) -> list:
     """Sum completed monthly aggregates per year and write float32/zlib map files.
 
     Maps are kept at the native grid; ``resolution`` (config dashboard.map_resolution)
@@ -205,11 +201,11 @@ def build_map_tables(resolution: float) -> list:
     from src.processing.aggregate import month_paths
     # (comparison, model, variable, domain, year) -> monthly aggregate files
     by_year: dict[tuple, list] = defaultdict(list)
-    for f in _complete_months():
+    for f in _complete_months(cfg):
         model, variable, domain = f.parts[-4], f.parts[-3], f.parts[-2]
         by_year[("", model, variable, domain, f.stem[:4])].append(f)
     dropped_runs: set[tuple] = set()          # paired years where this model lost runs to the pairing
-    for comparison, variable, domain, model, rec, month, src in _paired_months():
+    for comparison, variable, domain, model, rec, month, src in _paired_months(cfg):
         key = (comparison, model, variable, domain, month[:4])
         by_year[key].append(month_paths(model, variable, domain, month, src)[0])
         if rec["n_runs"][model] != rec["n_paired"]:

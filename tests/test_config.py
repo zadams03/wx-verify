@@ -264,7 +264,7 @@ def test_registry_wind_speed_is_two_component_field():
 
 def test_registry_freezing_level_is_gfs_only_and_masked():
     spec = get_variable("frzl")
-    assert spec.ecmwf is None and spec.gfs.idx_level == "0C isotherm"
+    assert spec.ecmwf is None and spec.gfs.level.idx_level == "0C isotherm"
     assert spec.masked and spec.era5.climatology is None
     assert not get_variable("t2m").masked
 

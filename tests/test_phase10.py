@@ -13,9 +13,9 @@ import xarray as xr
 from src import pipeline
 from src.data.byterange import _parts, _speed
 from src.data.era5_fetcher import ERA5Fetcher, derive
-from src.data.registry import GRAVITY, get_variable
+from src.data.registry import GRAVITY, MaskedLevelField, get_variable
 from src.processing.aggregate import aggregate_month, validate_aggregate
-from src.processing.metrics import masked_fraction
+from src.processing.metrics import EXCLUSION_COLS, exclusion_shares, masked_fraction, symmetric_mask
 from src.utils import paths
 from src.utils.config import Bounds, load_config
 from tests.test_pipeline import FakeERA5, FakeGFS, _raw_files, root  # noqa: F401  (fixtures)
@@ -106,14 +106,79 @@ def _masked_obs():
     return obs
 
 
+def _with_surface(fc, height):
+    """Attach a constant GFS surface height, as ByteRangeFetcher.load does for the freezing level."""
+    return fc.assign_coords(surface_height=xr.zeros_like(fc) + height)
+
+
 def test_masked_aggregate_counts_valid_points_and_validates():
-    agg = aggregate_month(_forecast(INITS, 3.0), _masked_obs(), None, REGIONS, IDENT, masked=True)
+    fc = _with_surface(_forecast(INITS, 3.0), -100.0)         # GFS level always above the surface
+    agg = aggregate_month(fc, _masked_obs(), None, REGIONS, IDENT, masked=True)
     validate_aggregate(agg)
     n = agg.stats["n"].values
     assert n[:, 0, 0].max() == 0 and n[:, 1, 1].max() == agg.counts["n_runs_included"]
+    assert np.array_equal(n + agg.stats["n_masked"].values, np.full(n.shape, agg.counts["n_runs_included"]))
     assert np.allclose(agg.stats["sum_e"].values[n > 0] / n[n > 0], 2.0)
     assert masked_fraction(agg.regions) == pytest.approx(1 / 6, abs=0.02)   # 1 of 6 points, cos-lat weights
     assert agg.stats["sum_fa2"].values.max() == 0                            # no anomalies → no ACC
+
+
+def test_masked_aggregate_without_surface_height_is_an_error():
+    with pytest.raises(ValueError, match="surface_height"):
+        aggregate_month(_forecast(INITS, 3.0), _masked_obs(), None, REGIONS, IDENT, masked=True)
+
+
+@pytest.mark.parametrize("era5_value, gfs_level, era5_bad, gfs_bad", [
+    (1500.0, 2000.0, False, False),        # both above ground: verified
+    (np.nan, 2000.0, True, False),         # ERA5 deg0l == 0 only
+    (1500.0, 0.0, False, True),            # GFS reports 0 over a sub-zero surface (ocean: surface 0 → at surface)
+    (1500.0, 300.0, False, True),          # GFS level below ground (surface 500 m)
+    (np.nan, 0.0, True, True),             # both
+    (1500.0, 500.0, False, True),          # exactly at the surface counts as excluded
+])
+def test_symmetric_mask_truth_table(era5_value, gfs_level, era5_bad, gfs_bad):
+    surface = 0.0 if gfs_level == 0.0 else 500.0
+    fc = _forecast(INITS[:1], gfs_level)
+    e, g = symmetric_mask(fc, xr.zeros_like(fc) + era5_value, xr.zeros_like(fc) + surface)
+    assert bool(e.all()) is era5_bad and bool(g.all()) is gfs_bad
+
+
+def test_exclusions_are_counted_separately_and_add_up():
+    fc = _with_surface(_forecast(INITS, 2000.0), 0.0)
+    fc.values[:, :, 0, 1] = 0.0                       # GFS 0 at (0,1): GFS-only
+    obs = _era5(ERA5_TIMES, 1500.0)
+    obs.values[:, 1, 0] = np.nan                      # ERA5-only at (1,0)
+    obs.values[:, 1, 1] = np.nan                      # both at (1,1) ...
+    fc.values[:, :, 1, 1] = 0.0
+    agg = aggregate_month(fc, obs, None, REGIONS, IDENT, masked=True)
+    validate_aggregate(agg)
+    r = agg.regions
+    assert np.allclose(r["sum_w"] + r[list(EXCLUSION_COLS)].sum(axis=1), r["sum_w_all"])
+    sh = exclusion_shares(r)
+    assert sh["gfs_only"] > 0 and sh["era5_only"] > 0 and sh["both"] > 0
+    assert sh["combined"] == pytest.approx(masked_fraction(r))
+    assert sh["combined"] == pytest.approx(1 / 2, abs=0.02)      # 3 of the region's 6 grid points drop out
+    assert agg.stats["n"].values[:, 0, 1].max() == 0 and agg.stats["n_masked"].values[:, 0, 1].min() > 0
+    assert agg.stats["n"].values[:, 0, 0].min() == agg.counts["n_runs_included"]
+
+
+def test_exclusion_shares_empty_for_tables_without_the_columns():
+    assert exclusion_shares(pd.DataFrame({"sum_w": [1.0], "sum_w_all": [1.0]})) == {}
+
+
+def test_gfs_freezing_level_is_fetched_with_surface_height_from_the_same_idx():
+    from src.data.gfs_fetcher import find_byte_range
+    field = get_variable("frzl").gfs
+    assert isinstance(field, MaskedLevelField)
+    assert (field.surface.idx_name, field.surface.idx_level) == ("HGT", "surface")
+    idx = ("561:1:d=2024011500:HGT:cloud ceiling:24 hour fcst:\n"
+           "562:100:d=2024011500:HGT:surface:24 hour fcst:\n"
+           "563:250:d=2024011500:HGT:0C isotherm:24 hour fcst:\n"
+           "564:400:d=2024011500:HGT:highest tropospheric freezing level:24 hour fcst:\n")
+    assert find_byte_range(idx, field.surface, 24) == (100, 249)
+    assert find_byte_range(idx, field.level, 24) == (250, 399)
+    with pytest.raises(ValueError):
+        find_byte_range(idx.replace("HGT:surface", "HGT:surface2"), field.surface, 24)
 
 
 def test_unmasked_aggregate_with_gaps_is_rejected():

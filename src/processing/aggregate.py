@@ -20,7 +20,9 @@ import xarray as xr
 
 from src.processing.alignment import align, homogeneous_runs, validate_aligned
 from src.processing.climatology import compute_anomaly
-from src.processing.metrics import STAT_VARS, region_stats, region_weights, sufficient_stats
+from src.processing.metrics import (
+    EXCLUSION_COLS, STAT_VARS, region_stats, region_weights, sufficient_stats, symmetric_mask,
+)
 from src.utils import paths
 from src.utils.config import Bounds
 
@@ -50,9 +52,12 @@ def aggregate_month(
 
     Only runs with every lead time present in both forecast and ERA5 are used.
     ``clim`` None means the variable has no anomaly score: anomalies are zero, so the
-    ACC sums are zero and ACC comes out undefined. ``masked``: ERA5 is NaN at points
-    outside the verification sample (freezing level); those points drop out of every
-    sum and the region table records the unmasked weight in ``sum_w_all``.
+    ACC sums are zero and ACC comes out undefined. ``masked`` (freezing level): the
+    sample is defined by both sources (``symmetric_mask``) — ERA5 is NaN where its 0°C level
+    is at the surface, and the forecast must carry a ``surface_height`` coord: points where
+    its level is at or below that are dropped. Dropped points leave every sum; the grid
+    statistics keep their count (``n_masked``) and the region table the weight each side
+    excluded (ERA5 only / GFS only / both) beside ``sum_w_all``.
     """
     fc, obs, obs_present = align(forecast, era5)
     keep, counts, excluded = homogeneous_runs(forecast["present"], obs_present)
@@ -65,12 +70,20 @@ def aggregate_month(
     obs = obs.isel(init_time=keep.values)
     validate_aligned(fc, obs)
 
+    era5_bad = gfs_bad = None
+    if masked:
+        if "surface_height" not in fc.coords:
+            raise ValueError("masked variable but the forecast has no surface_height coord")
+        era5_bad, gfs_bad = symmetric_mask(fc, obs, fc["surface_height"])
+        fc = fc.where(~gfs_bad)
+        obs = obs.where(~gfs_bad)
+
     if clim is None:
         fc_anom, obs_anom = xr.zeros_like(fc), xr.zeros_like(obs)
     else:
         fc_anom = compute_anomaly(fc, clim, fc.valid_time)
         obs_anom = compute_anomaly(obs, clim, obs.valid_time)
-    stats = sufficient_stats(fc, obs, fc_anom, obs_anom)
+    stats = sufficient_stats(fc, obs, fc_anom, obs_anom, excluded=None if not masked else era5_bad | gfs_bad)
 
     frames = []
     for name, bounds in regions.items():
@@ -80,7 +93,8 @@ def aggregate_month(
         if lat_ok.size == 0 or lon_ok.size == 0:
             raise ValueError(f"Region '{name}' contains no grid points")
         box = dict(latitude=slice(lat_ok[0], lat_ok[-1] + 1), longitude=slice(lon_ok[0], lon_ok[-1] + 1))
-        df = region_stats(fc.isel(box), obs.isel(box), fc_anom.isel(box), obs_anom.isel(box), w.isel(box))
+        excl = {} if not masked else dict(era5_excluded=era5_bad.isel(box), gfs_excluded=gfs_bad.isel(box))
+        df = region_stats(fc.isel(box), obs.isel(box), fc_anom.isel(box), obs_anom.isel(box), w.isel(box), **excl)
         df.insert(0, "region", name)
         frames.append(df)
     region_df = pd.concat(frames, ignore_index=True)
@@ -94,7 +108,7 @@ def validate_aggregate(agg: MonthAggregate, tol: float = 1e-9) -> None:
     c, s = agg.counts, agg.stats
     if c["n_runs_included"] + c["n_excluded_forecast_missing"] + c["n_excluded_era5_missing"] != c["n_runs_total"]:
         raise ValueError(f"Run counts do not add up: {c}")
-    for name in STAT_VARS:
+    for name in STAT_VARS + (("n_masked",) if agg.masked else ()):
         if name not in s:
             raise ValueError(f"Missing statistic '{name}'")
         if not np.isfinite(s[name].values).all():
@@ -108,6 +122,15 @@ def validate_aggregate(agg: MonthAggregate, tol: float = 1e-9) -> None:
             f"Sample not homogeneous: n ranges {n.min()}..{n.max()} vs "
             f"{c['n_runs_included']} included runs"
         )
+    if agg.masked:
+        if "n_masked" not in s or not np.array_equal(n + s["n_masked"].values, np.full(n.shape, c["n_runs_included"])):
+            raise ValueError("n + n_masked differs from the number of included runs")
+        missing = set(EXCLUSION_COLS) - set(agg.regions.columns)
+        if missing:
+            raise ValueError(f"Region table lacks exclusion columns {sorted(missing)}")
+        parts = agg.regions["sum_w"] + agg.regions[list(EXCLUSION_COLS)].sum(axis=1)
+        if not np.allclose(parts, agg.regions["sum_w_all"], rtol=1e-9):
+            raise ValueError("sum_w plus the exclusion weights differs from sum_w_all")
     with np.errstate(invalid="ignore", divide="ignore"):      # n is 0 at points the mask excludes
         mean_e, mean_e2 = s["sum_e"].values / n, s["sum_e2"].values / n
     if (mean_e2 < mean_e ** 2 - 1e-6 * (1 + mean_e2)).any():
@@ -162,7 +185,7 @@ def write_aggregate(agg: MonthAggregate, ident: dict[str, str],
     agg.runs.to_parquet(rn_tmp, index=False)
 
     with xr.open_dataset(nc_tmp) as chk:
-        for v in STAT_VARS:
+        for v in agg.stats.data_vars:
             if not np.array_equal(chk[v].values, agg.stats[v].values):
                 raise ValueError(f"Written file differs from memory for '{v}'")
     pd.testing.assert_frame_equal(pd.read_parquet(pq_tmp), agg.regions, check_dtype=False)

@@ -15,7 +15,9 @@ from src.processing.alignment import align, homogeneous_runs, validate_aligned
 from src.processing.metrics import bias, map_metrics, rmse
 from src.processing.climatology import build_climatology, compute_anomaly
 from src.utils import paths
-from src.utils.config import Bounds
+from src.utils.config import Bounds, load_config
+
+CFG = load_config()
 
 LATS = np.array([52.0, 51.75, 51.5])
 LONS = np.array([0.0, 0.25])
@@ -269,7 +271,7 @@ class TestMapTables:
         monkeypatch.setattr(paths, "DATA_ROOT", tmp_path)
         a = _write_month("2023-01", 3.0, tmp_path)
         b = _write_month("2023-02", 5.0, tmp_path)
-        (out,) = tables.build_map_tables(0.25)
+        (out,) = tables.build_map_tables(CFG, 0.25)
         assert out == paths.map_dir("gfs", "t2m", "europe") / "2023.nc"
         with xr.open_dataset(out) as ds:
             assert set(ds.data_vars) == set(MAP_STAT_VARS)
@@ -286,9 +288,9 @@ class TestMapTables:
         monkeypatch.setattr(paths, "DATA_ROOT", tmp_path)
         _write_month("2023-01", 3.0, tmp_path)
         _write_month("2023-02", 5.0, tmp_path, with_regions=False)
-        tables.build_map_tables(0.25)
-        region = tables.build_region_table()
-        cov = tables.build_coverage_table()
+        tables.build_map_tables(CFG, 0.25)
+        region = tables.build_region_table(CFG)
+        cov = tables.build_coverage_table(CFG)
         assert list(region["month"].unique()) == ["2023-01"]
         assert list(cov["month"]) == ["2023-01"]
         with xr.open_dataset(paths.map_dir("gfs", "t2m", "europe") / "2023.nc") as ds:
@@ -298,7 +300,7 @@ class TestMapTables:
         monkeypatch.setattr(paths, "DATA_ROOT", tmp_path)
         _write_month("2023-01", 3.0, tmp_path)
         with pytest.raises(ValueError, match="native resolution"):
-            tables.build_map_tables(0.5)
+            tables.build_map_tables(CFG, 0.5)
 
 
 # ---------------------------------------------------------------------------

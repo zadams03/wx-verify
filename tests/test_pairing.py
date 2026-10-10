@@ -153,9 +153,9 @@ def test_identical_run_sets_reuse_standalone_aggregates(root, monkeypatch):
     rec = json.loads(paths.pairing_path(CMP, "t2m", "europe", "2023-01").read_text())
     assert rec["identical"] and rec["n_paired"] == 3 and rec["dropped"] == {"gfs": [], "ecmwf": []}
 
-    tables.build_region_table()
-    tables.build_coverage_table()
-    tables.build_map_tables(0.25)
+    tables.build_region_table(CFG)
+    tables.build_coverage_table(CFG)
+    tables.build_map_tables(CFG, 0.25)
     for m in ("gfs", "ecmwf"):
         pd.testing.assert_frame_equal(region_rows(CMP, m), region_rows("", m), check_dtype=False)
         # no duplicate paired map: the standalone one is the paired one
@@ -197,9 +197,9 @@ def test_run_missing_for_one_model_is_removed_from_both(root, monkeypatch):
     for v in direct.stats.data_vars:
         np.testing.assert_array_equal(got[v].values, direct.stats[v].values)
 
-    tables.build_region_table()
-    tables.build_coverage_table()
-    tables.build_map_tables(0.25)
+    tables.build_region_table(CFG)
+    tables.build_coverage_table(CFG)
+    tables.build_map_tables(CFG, 0.25)
     assert (region_rows(CMP, "gfs")["n_forecasts"] == 2).all()
     assert (region_rows("", "gfs")["n_forecasts"] == 3).all()
     assert (region_rows(CMP, "ecmwf")["n_forecasts"] == 2).all()
@@ -251,7 +251,7 @@ def test_paired_map_is_written_when_the_year_has_unpaired_months(root, monkeypat
     setup_models(monkeypatch, gfs, ecmwf)
     pipeline.process_month(CFG_SMALL, "gfs", "t2m", "europe", 2023, 2, keep_raw=False)
     assert pair()["identical"]
-    tables.build_map_tables(0.25)
+    tables.build_map_tables(CFG, 0.25)
     with xr.open_dataset(paths.map_dir("gfs", "t2m", "europe", CMP) / "2023.nc") as ds:
         assert ds.attrs["n_months"] == 1 and ds.attrs["n_runs_included"] == 3
     with xr.open_dataset(paths.map_dir("gfs", "t2m", "europe") / "2023.nc") as ds:
@@ -265,5 +265,5 @@ def test_stale_paired_map_is_removed_when_it_is_no_longer_needed(root, monkeypat
     stale.parent.mkdir(parents=True)
     stale.write_bytes(b"old")
     pair()
-    tables.build_map_tables(0.25)
+    tables.build_map_tables(CFG, 0.25)
     assert not stale.exists()

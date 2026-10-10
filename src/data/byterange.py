@@ -38,7 +38,7 @@ if sys.platform == "win32":
 import cfgrib  # noqa: E402
 
 from src.data.base_fetcher import BaseFetcher
-from src.data.registry import get_variable
+from src.data.registry import MaskedLevelField, get_variable
 from src.utils import paths
 
 logger = logging.getLogger(__name__)
@@ -105,6 +105,20 @@ def _parts(field) -> tuple:
     return getattr(field, "parts", None) or (field,)
 
 
+def _combine(parts: list[xr.DataArray], field) -> xr.DataArray:
+    """One array per job from the decoded messages of its field: the field itself, the wind
+    speed of two components, or (level, surface) stacked on a leading ``component`` dim."""
+    if len(parts) == 1:
+        return parts[0]
+    if isinstance(field, MaskedLevelField):
+        level, surface = parts
+        if not (np.array_equal(level.latitude.values, surface.latitude.values)
+                and np.array_equal(level.longitude.values, surface.longitude.values)):
+            raise ValueError("level and surface height are on different grids")
+        return xr.concat([level, surface], dim="component")
+    return _speed(*parts)
+
+
 def _speed(u: xr.DataArray, v: xr.DataArray) -> xr.DataArray:
     """√(u²+v²) in float64, returned as float32 on the components' grid."""
     if not (np.array_equal(u.latitude.values, v.latitude.values)
@@ -120,6 +134,8 @@ class ByteRangeFetcher(BaseFetcher):
     data/raw/{model}/{domain}/{variable}_{YYYY-MM}.nc with
       data    (init_time, lead_time, latitude, longitude) float32, source units
       present (init_time, lead_time) int8 — 0 where the file could not be fetched
+      surface (init_time, lead_time, latitude, longitude) float32, source units — only for
+              fields masked against the model's surface height (freezing level)
     """
 
     model: str          # config key and raw directory name
@@ -205,11 +221,14 @@ class ByteRangeFetcher(BaseFetcher):
         if data is None:
             raise RuntimeError(f"All {len(jobs)} {self.label} downloads failed for {year}-{month:02d}")
 
+        dims = ("init_time", "lead_time", "latitude", "longitude")
+        variables = {"present": (("init_time", "lead_time"), present)}
+        if isinstance(field, MaskedLevelField):
+            variables["data"], variables["surface"] = (dims, data[:, :, 0]), (dims, data[:, :, 1])
+        else:
+            variables["data"] = (dims, data)
         ds = xr.Dataset(
-            {
-                "data": (("init_time", "lead_time", "latitude", "longitude"), data),
-                "present": (("init_time", "lead_time"), present),
-            },
+            variables,
             coords={
                 "init_time": np.array(init_times, dtype="datetime64[ns]"),
                 "lead_time": leads,
@@ -220,7 +239,7 @@ class ByteRangeFetcher(BaseFetcher):
                    "n_requested": len(jobs), "n_failed": n_failed},
         )
         part = out.with_suffix(".nc.part")
-        ds.to_netcdf(part, encoding={"data": {"zlib": True, "complevel": 4}})
+        ds.to_netcdf(part, encoding={v: {"zlib": True, "complevel": 4} for v in ds.data_vars if v != "present"})
         os.replace(part, out)
         logger.info("Saved %s (%d/%d fields)", out.name, len(jobs) - n_failed, len(jobs))
         return out
@@ -248,7 +267,7 @@ class ByteRangeFetcher(BaseFetcher):
                 try:
                     parts = [self._decode_bytes(c, f, bounds, tmp_dir)
                              for c, f in zip(fut.result(), _parts(field))]
-                    da = parts[0] if len(parts) == 1 else _speed(*parts)
+                    da = _combine(parts, field)
                 except Exception as exc:
                     failures[job] = exc
                     continue
@@ -271,6 +290,10 @@ class ByteRangeFetcher(BaseFetcher):
             vals = ds.data.values[present]
             if np.isnan(vals).any():
                 raise ValueError(f"{path.name}: NaN inside fields marked present")
+            if "surface" in ds:
+                surf = ds.surface.values[present]
+                if np.isnan(surf).any() or surf.min() < -500 or surf.max() > 9000:
+                    raise ValueError(f"{path.name}: surface height missing or outside [-500, 9000] m")
             conv = spec.source_field(self.model).conversion.apply(vals)
             lo, hi = spec.valid_range
             if conv.min() < lo or conv.max() > hi:
@@ -280,11 +303,14 @@ class ByteRangeFetcher(BaseFetcher):
                 )
 
     def load(self, path: Path, variable: str) -> xr.DataArray:
-        """Return forecasts in display units with a ``present`` (init, lead) coord."""
+        """Return forecasts in display units with a ``present`` (init, lead) coord, and a
+        ``surface_height`` coord (same dims as the data) for fields masked against it."""
         conv = get_variable(variable).source_field(self.model).conversion
         with xr.open_dataset(path) as ds:
             ds = ds.load()
         da = conv.apply(ds["data"].astype("float64")).astype("float32")
         da = da.assign_coords(present=(("init_time", "lead_time"), ds["present"].values.astype(bool)))
+        if "surface" in ds:
+            da = da.assign_coords(surface_height=ds["surface"].astype("float32"))
         da.attrs.update(source=self.label, variable=variable)
         return da

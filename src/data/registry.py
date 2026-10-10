@@ -71,7 +71,25 @@ class SpeedField:
         return (self.u, self.v)
 
 
-GRAVITY = 9.80665      # m s⁻², converts ERA5 geopotential (m² s⁻²) to metres
+@dataclass(frozen=True)
+class MaskedLevelField:
+    """A GFS height field together with the GFS surface height it is masked against.
+
+    Both are fetched through the same byte-range path. The raw file keeps the level as
+    ``data`` and the surface height as ``surface``; the verification sample drops points where
+    the level is at or below the surface (SPEC 3.1, Phase 10b).
+    """
+
+    level: GFSField
+    surface: GFSField
+    conversion: UnitConversion = field(default_factory=UnitConversion)
+
+    @property
+    def parts(self) -> tuple[GFSField, ...]:
+        return (self.level, self.surface)
+
+
+GRAVITY = 9.80665     # m s⁻², converts ERA5 geopotential (m² s⁻²) to metres
 
 
 @dataclass(frozen=True)
@@ -102,7 +120,7 @@ class ERA5Field:
 class VariableSpec:
     key: str
     valid_range: tuple[float, float]   # plausible values in display units
-    gfs: GFSField | SpeedField | None = None
+    gfs: GFSField | SpeedField | MaskedLevelField | None = None
     ecmwf: ECMWFField | SpeedField | None = None
     era5: ERA5Field | None = None
 
@@ -111,7 +129,7 @@ class VariableSpec:
         """True when the verification sample varies by point and time (freezing level)."""
         return self.era5 is not None and self.era5.derive == "freezing_level"
 
-    def source_field(self, source: str) -> GFSField | ECMWFField | SpeedField | ERA5Field:
+    def source_field(self, source: str) -> GFSField | ECMWFField | SpeedField | MaskedLevelField | ERA5Field:
         """Return the field definition for ``source`` ('gfs', 'ecmwf' or 'era5')."""
         entry = getattr(self, source, None) if source in ("gfs", "ecmwf", "era5") else None
         if entry is None:
@@ -180,7 +198,10 @@ VARIABLES: dict[str, VariableSpec] = {
     "frzl": VariableSpec(
         key="frzl",
         valid_range=(-1000.0, 10000.0),
-        gfs=GFSField("HGT", "0C isotherm", {"typeOfLevel": "isothermZero"}, "gh"),
+        gfs=MaskedLevelField(
+            level=GFSField("HGT", "0C isotherm", {"typeOfLevel": "isothermZero"}, "gh"),
+            surface=GFSField("HGT", "surface", {"typeOfLevel": "surface"}, "orog"),
+        ),
         era5=ERA5Field(("zero_degree_level", "geopotential"), ("deg0l", "z"),
                        derive="freezing_level", climatology=None),
     ),

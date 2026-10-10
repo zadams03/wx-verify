@@ -380,9 +380,9 @@ def _rebuild_tables(cfg: Config) -> None:
     )
     from src.data.map_store import build_manifest
     try:
-        build_region_table()
-        build_coverage_table()
-        build_map_tables(cfg.dashboard.map_resolution)
+        build_region_table(cfg)
+        build_coverage_table(cfg)
+        build_map_tables(cfg, cfg.dashboard.map_resolution)
         manifest = build_manifest(cfg)
         logger.info("Map manifest: %d files, %.0f MB for release %s", len(manifest["files"]),
                     manifest["total_bytes"] / 1e6, manifest["release_tag"])
