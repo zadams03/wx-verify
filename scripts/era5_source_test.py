@@ -136,36 +136,44 @@ def _ncar_files(fs, product: str, code: str, year: int, month: int) -> list[str]
 
 
 def fetch_ncar() -> None:
+    """NCAR files are global NetCDF4, one per variable and month (surface analyses) or per
+    variable and day (pressure levels, all 37 levels in one file). Ranged reads of them over S3
+    were far too slow, so each file is downloaded whole (timed), subset, and deleted. The
+    pressure-level z500 test uses day 1 only (one file is ~1 GB; a month would be ~33 GB)."""
     import s3fs
     fs = s3fs.S3FileSystem(anon=True)
     times = _times()
+    tmp = WORK / "ncar" / ".tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
     for name, (_, _, level, _, ncar) in FIELDS.items():
         t0 = time.time()
         if ncar is None:
             print(f"ncar/{name}: NOT AVAILABLE (no zero-degree-level field in e5.oper.an.sfc)", flush=True)
             continue
-        product, code = ncar
-        if product == "e5.oper.invariant":
-            files = _ncar_files(fs, product, code, 1979, 1)
-        else:
-            files = _ncar_files(fs, product, code, YEAR, MONTH)
-        if not files:
-            print(f"ncar/{name}: no files for {code}", flush=True)
+        if (WORK / "ncar" / f"{name}.nc").exists():
             continue
+        product, code = ncar
+        files = _ncar_files(fs, product, code, 1979 if product == "e5.oper.invariant" else YEAR,
+                            1 if product == "e5.oper.invariant" else MONTH)
+        if product == "e5.oper.an.pl":
+            files = files[:1]                                   # day 1 only
         parts, nbytes = [], 0
         for f in files:
-            nbytes += fs.size(f)
-            with fs.open(f, "rb", block_size=8 * 2**20, cache_type="readahead") as fh:
-                with xr.open_dataset(fh, engine="h5netcdf") as d:
-                    var = [v for v in d.data_vars if d[v].ndim >= 3 or v.lower() == "z"][0]
-                    da = d[var]
-                    if "time" in da.dims:
-                        da = da.sel(time=[t for t in times if t in da.time.values])
-                    if level:
-                        da = da.sel(level=int(level), drop=True)
-                    parts.append(_subset(da).load())
-                    src = f"{var} ({product}/{code})"
-                    units = da.attrs.get("units")
+            local = tmp / f.split("/")[-1]
+            fs.get(f, str(local))
+            nbytes += local.stat().st_size
+            with xr.open_dataset(local, engine="h5netcdf") as d:
+                var = [v for v in d.data_vars if d[v].ndim >= 3 or v.lower() == "z"][0]
+                da = d[var]
+                units, src = da.attrs.get("units"), f"{var} ({product}/{code})"
+                if product == "e5.oper.invariant":
+                    da = da.isel(time=0, drop=True) if "time" in da.dims else da     # static field
+                elif "time" in da.dims:
+                    da = da.sel(time=[t for t in times if t in da.time.values])
+                if level:
+                    da = da.sel(level=int(level), drop=True)
+                parts.append(_subset(da.load()))
+            local.unlink()
         da = xr.concat(parts, dim="time") if "time" in parts[0].dims else parts[0]
         da.attrs = {"units": units, "src_name": src}
         _save(name, "ncar", da, t0, nbytes)
@@ -217,10 +225,12 @@ def compare() -> None:
                                             and np.allclose(da.longitude, ref.longitude, atol=1e-4))
                 if "time" in da.dims and "time" in ref.dims:
                     row["times_same"] = bool(np.array_equal(da.time.values, ref.time.values))
-                    a, b = da.reindex_like(ref, method=None, tolerance=1e-4) if not row["cds_grid_same"] else da, ref
-                    if row["times_same"]:
-                        a = a.assign_coords(latitude=ref.latitude.values, longitude=ref.longitude.values) \
-                            if row["cds_grid_same"] else a
+                    if not row["times_same"] and set(da.time.values) <= set(ref.time.values):
+                        ref = ref.sel(time=da.time.values)            # partial-month source (NCAR z500: day 1)
+                        row["compared_times"] = da.time.size
+                    if da.time.size == ref.time.size and row["cds_grid_same"]:
+                        a = da.assign_coords(latitude=ref.latitude.values, longitude=ref.longitude.values)
+                        b = ref
                         d = np.abs(a.values.astype("float64") - b.values.astype("float64"))
                         row["max_abs_diff"], row["mean_abs_diff"] = float(np.nanmax(d)), float(np.nanmean(d))
                         row["cds_range"] = (float(np.nanmin(b.values)), float(np.nanmax(b.values)))
