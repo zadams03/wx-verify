@@ -86,7 +86,8 @@ VARIABLE_NOTES = {
         "freezing level, compared with ERA5's zero-degree level (given above ground, converted with ERA5 "
         "orography). A point and forecast are verified only if both put the freezing level above their own "
         "surface; sub-zero surfaces are excluded from both. Because that sample varies by point and time, "
-        "only bias and RMSE are shown (no ACC)."
+        "only bias and RMSE are shown (no ACC). The GFS half of the mask depends on the forecast, so the "
+        "excluded share grows with lead time and the curves are not a strictly homogeneous sample."
     ),
 }
 

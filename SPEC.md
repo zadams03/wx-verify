@@ -516,6 +516,7 @@ Build steps:
 - **Summer offset (Issue 013).** July 2024, nothing masked, 24 h bias over all verified points: Europe −157 m (v1.7: −167), NA −131 m (−139); 240 h −200 m and −28 m. Same with either GFS field to within ~10 m.
 - **Hand check (76d):** European Alps 2024-01 and Rockies 2024-07, 24 h and 240 h, recomputed in plain numpy from the raw GFS and ERA5 fields (no pipeline aggregates): Σw, Σw·e, Σw·e² and the three exclusion weights match the region table to ≤ 1e-8 relative (e.g. Alps 24 h bias −93.775 m, RMSE 248.580 m, both).
 - Additions beyond spec (approved): `HGT:highest tropospheric freezing level` instead of the 0C isotherm; `n_masked` per point; `tables.py` takes `cfg` as an argument.
+- **Sample shifts with lead (found in the Phase 11 review).** The GFS half of the symmetric mask depends on the forecast, so the freezing-level sample is not strictly homogeneous across lead times: the excluded share grows with lead (Western Europe, whole record: 3.7 % at 24 h, 3.8 % at 48 h, 3.8 % at 72 h, 4.0 % at 120 h, 4.8 % at 240 h). Freezing-level skill curves therefore compare slightly different samples at different leads.
 
 ---
 
