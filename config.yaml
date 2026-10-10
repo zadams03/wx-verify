@@ -22,7 +22,7 @@ variables:
   msl:  {long_name: "Mean sea level pressure", units: "hPa", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: true}
   z500: {long_name: "500 hPa geopotential height", units: "m", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: true}
   ws10: {long_name: "10m wind speed", units: "m/s", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: true}
-  frzl: {long_name: "Freezing level", units: "m", scores: [bias, rmse], models: [gfs], enabled: false}  # withheld from v1.7 — Issue 015, fixed in Phase 10b
+  frzl: {long_name: "Freezing level", units: "m", scores: [bias, rmse], models: [gfs], enabled: true}
   tp24: {long_name: "24h precipitation", units: "mm", scores: [freq_bias, ets, bias], thresholds: [1, 5, 10], models: [gfs, ecmwf], enabled: false}
   swe:  {long_name: "Snow water equivalent", units: "mm", scores: [bias, rmse], models: [gfs, ecmwf], enabled: false}
 
@@ -51,5 +51,5 @@ climatology: {source: era5_monthly_by_hour, period: [1991, 2020]}
 dashboard:
   map_resolution: 0.25
   committed_size_budget_mb: 150
-  maps_release_tag: maps-20261008     # GitHub Release holding data/dashboard/maps (scripts/publish_maps.sh)
+  maps_release_tag: maps-20261010     # GitHub Release holding data/dashboard/maps (scripts/publish_maps.sh)
   maps_repo: zadams03/wx-verify

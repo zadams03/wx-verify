@@ -42,8 +42,8 @@ _TERRAIN_NOTES = {
     ),
     "frzl": (
         "Mountain region: the freezing level is expressed above sea level while model and ERA5 terrain "
-        "differ in height at 0.25°, and points where ERA5 has the 0°C level at the surface are excluded, "
-        "so part of the bias and error here reflects terrain representation, not forecast error."
+        "differ in height at 0.25°, and points where either source has the 0°C level at the surface are "
+        "excluded, so part of the bias and error here reflects terrain representation, not forecast error."
     ),
 }
 
@@ -63,10 +63,11 @@ VARIABLE_NOTES = {
         "the mean of ERA5 wind *speed* (not the speed of the mean wind), 1991–2020."
     ),
     "frzl": (
-        "Freezing level is the height of the 0°C isotherm above sea level. ERA5 provides it above ground "
-        "and is converted with ERA5 orography. It is verified only where ERA5 puts the 0°C level above "
-        "the surface; points with a sub-zero surface are excluded for each forecast. Because that sample "
-        "varies by point and time, only bias and RMSE are shown (no ACC)."
+        "Freezing level is the height of the 0°C level above sea level: the GFS highest tropospheric "
+        "freezing level, compared with ERA5's zero-degree level (given above ground, converted with ERA5 "
+        "orography). A point and forecast are verified only if both put the freezing level above their own "
+        "surface; sub-zero surfaces are excluded from both. Because that sample varies by point and time, "
+        "only bias and RMSE are shown (no ACC)."
     ),
 }
 
@@ -74,7 +75,7 @@ VARIABLE_NOTES = {
 def freezing_level_note(masked_fraction: float) -> str:
     """Sample note for the freezing level, with the excluded share of this region and window."""
     return (f"Freezing level: {masked_fraction:.1%} of this region's grid-point forecasts are excluded "
-            "because ERA5 has the 0°C level at the surface (sub-zero surface).")
+            "because ERA5 or GFS (or both) has the 0°C level at the surface (sub-zero surface).")
 
 
 CENTRED_ACC_NOTE = (
