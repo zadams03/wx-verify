@@ -32,7 +32,9 @@ LABEL = "24h precipitation"
 @pytest.fixture
 def precip_data(tmp_path, monkeypatch):
     """GFS and ECMWF tp24 aggregates for one month (same runs), paired, with dashboard tables built."""
+    import streamlit as st
     monkeypatch.setattr(paths, "DATA_ROOT", tmp_path)
+    st.cache_data.clear()                      # the app caches its tables per process, not per data root
     inits = pd.date_range("2024-03-01", periods=8, freq="12h")
     for seed, model in ((11, "gfs"), (12, "ecmwf")):
         fc, obs = _month(seed, inits)
@@ -45,7 +47,8 @@ def precip_data(tmp_path, monkeypatch):
     build_coverage_table(CFG)
     build_map_tables(CFG, 0.25)
     build_manifest(CFG)
-    return tmp_path
+    yield tmp_path
+    st.cache_data.clear()
 
 
 def _app() -> AppTest:
