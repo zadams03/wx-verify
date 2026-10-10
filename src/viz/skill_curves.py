@@ -281,3 +281,93 @@ def build_comparison_curves(
         height=640, margin=dict(l=70, r=40, t=100, b=60),
     )
     return fig
+
+
+# ---------------------------------------------------------------------------
+# Precipitation: frequency bias, ETS and mean bias at one threshold (SPEC 3.7)
+# ---------------------------------------------------------------------------
+
+MIN_FREQ_BIAS_HALF_RANGE = 0.25      # the frequency-bias axis always spans at least 0.75–1.25
+
+
+def freq_bias_axis_range(values) -> list[float]:
+    """Frequency-bias axis centred on 1 (the unbiased value) and symmetric about it."""
+    dev = [abs(v - 1.0) for v in values if v == v]          # NaN-safe
+    half = max(MIN_FREQ_BIAS_HALF_RANGE, 1.15 * max(dev, default=0.0))
+    return [1.0 - half, 1.0 + half]
+
+
+def build_precip_curves(
+    summaries: dict[str, pd.DataFrame],
+    region_name: str = "Western Europe",
+    lead_times: list[int] | None = None,
+    units: str = "mm",
+    threshold: float = 1.0,
+) -> go.Figure:
+    """Frequency bias, ETS and mean bias vs lead time for one or two models at one threshold.
+
+    summaries: {model: DataFrame(lead_time_h, freq_bias, ets, bias)}. Three stacked panels on one
+    logarithmic lead-time axis. Frequency bias is centred on 1 (dotted reference line, perfect = 1);
+    ETS runs 0–1 with 0 (no skill beyond chance) marked; mean bias is in the precipitation units.
+    Several models are overlaid in one colour each (they must be verified on the same runs).
+    """
+    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.07,
+                        subplot_titles=(f"Frequency bias (≥ {threshold:g} {units}/24h)",
+                                        f"ETS (≥ {threshold:g} {units}/24h)", f"Mean bias ({units}/24h)"))
+    all_leads = sorted({h for df in summaries.values() for h in df["lead_time_h"]})
+    axis_lead_times = sorted(lead_times or all_leads)
+    intermediate = [
+        h for h in range(_GRID_STEP_H, max(axis_lead_times), _GRID_STEP_H)
+        if h > min(axis_lead_times) and h not in axis_lead_times
+    ]
+    x_range = [math.log10(_X_PAD_LOW * min(axis_lead_times)),
+               math.log10(_X_PAD_HIGH * max(axis_lead_times))]
+
+    fallback = iter(_FALLBACK_COLORS)
+    panels = (("freq_bias", 1, "Frequency bias", ".2f", ""), ("ets", 2, "ETS", ".3f", ""),
+              ("bias", 3, "Mean bias", "+.2f", f" {units}"))
+    for model, df in summaries.items():
+        color = _MODEL_COLORS.get(model) or next(fallback)
+        for col, row, label, fmt, unit in panels:
+            fig.add_trace(
+                go.Scatter(
+                    x=df["lead_time_h"], y=df[col], name=model.upper(),
+                    legendgroup=model, showlegend=(row == 1 and len(summaries) > 1),
+                    mode="lines+markers",
+                    line=dict(color=color, width=2.5, dash="dash" if col == "bias" else "solid"),
+                    marker=dict(size=8),
+                    hovertemplate=f"<b>{model.upper()} {label}</b>: %{{y:{fmt}}}{unit}<extra></extra>",
+                ),
+                row=row, col=1,
+            )
+
+    ref = dict(line_color=_COLOR_THRESHOLD, line_width=1.5, line_dash="dot")
+    fig.add_hline(y=1.0, row=1, col=1, annotation_text="1 = unbiased", annotation_position="top left",
+                  annotation_font=dict(size=10, color=_COLOR_THRESHOLD), **ref)
+    fig.add_hline(y=0.0, row=2, col=1, annotation_text="0 = no skill beyond chance",
+                  annotation_position="top left", annotation_font=dict(size=10, color=_COLOR_THRESHOLD), **ref)
+    for row in (1, 2, 3):
+        for h in intermediate:
+            fig.add_vline(x=math.log10(h), line_color=_COLOR_GRID_MINOR, line_width=0.5, row=row, col=1,
+                          layer="below")
+
+    fig.update_xaxes(
+        type="log", range=x_range, tickmode="array", tickvals=axis_lead_times,
+        ticktext=[f"{h}h" for h in axis_lead_times], showgrid=True, gridcolor=_COLOR_GRID,
+        showline=True, linecolor="rgba(100,100,100,0.4)", tickfont=dict(size=12),
+    )
+    fig.update_xaxes(title_text="Forecast Lead Time", title_font=dict(size=13), row=3, col=1)
+    fig.update_yaxes(showgrid=True, gridcolor=_COLOR_GRID, showline=True,
+                     linecolor="rgba(100,100,100,0.4)", tickfont=dict(size=12), zeroline=False)
+    fb = [v for df in summaries.values() for v in df["freq_bias"]]
+    fig.update_yaxes(range=freq_bias_axis_range(fb), row=1, col=1)
+    fig.update_yaxes(range=[-0.05, 1.0], row=2, col=1)
+    fig.update_yaxes(zeroline=True, zerolinecolor="rgba(100,100,100,0.35)", row=3, col=1)
+    fig.update_layout(
+        title=dict(text=f"Precipitation skill vs lead time — {region_name}", font=dict(size=15),
+                   x=0.5, xanchor="center"),
+        legend=dict(orientation="h", x=0.5, xanchor="center", y=1.07, font=dict(size=12)),
+        hovermode="x unified", plot_bgcolor="white", paper_bgcolor="white",
+        height=640, margin=dict(l=70, r=40, t=100, b=60),
+    )
+    return fig

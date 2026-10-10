@@ -23,12 +23,15 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from src.data.map_store import MapUnavailable, get_map_file
+from src.processing.categorical import categorical_metrics, map_scores
 from src.processing.metrics import combine_stats, map_metrics, masked_fraction, region_metrics
 from src.utils import paths
 from src.utils.config import comparison_models, load_config
 from src.viz.components import (
     CENTRED_ACC_NOTE,
     ERA5_LINEAGE_NOTE,
+    PRECIP_COMPARISON_MAP_VIEWS,
+    PRECIP_NOTE,
     VARIABLE_NOTES,
     freezing_level_note,
     inject_card_styles,
@@ -38,9 +41,11 @@ from src.viz.components import (
     render_map_view_toggle,
     render_metric_cards,
     render_month_range_selector,
+    render_precip_cards,
+    render_threshold_selector,
     terrain_note,
 )
-from src.viz.skill_curves import build_comparison_curves, build_skill_curves
+from src.viz.skill_curves import build_comparison_curves, build_precip_curves, build_skill_curves
 from src.viz.spatial_maps import build_spatial_map, zoom_bounds
 
 _ERA5T_WINDOW_DAYS = 100   # ERA5 is preliminary (ERA5T) for roughly the latest 3 months
@@ -59,6 +64,18 @@ def _load_region_table() -> pd.DataFrame | None:
     df = pd.read_parquet(path)
     if "comparison" not in df:
         df["comparison"] = ""
+    for col in ("comparison", "model", "variable", "domain", "region", "month"):
+        df[col] = df[col].astype(str)
+    return df
+
+
+@st.cache_data
+def _load_categorical_table() -> pd.DataFrame | None:
+    """Weighted contingency counts (precipitation), same ``comparison`` convention as the region table."""
+    path = paths.dashboard_dir() / "region_categorical.parquet"
+    if not path.exists():
+        return None
+    df = pd.read_parquet(path)
     for col in ("comparison", "model", "variable", "domain", "region", "month"):
         df[col] = df[col].astype(str)
     return df
@@ -89,6 +106,33 @@ def _load_map_stats(model: str, variable: str, domain: str, years: tuple[int, ..
     return combine_stats(parts) if parts else None
 
 
+def _precip_map_figure(stats, pair, model, map_view, threshold, lead_time_h, region_bounds, region_name, units,
+                       view):
+    """Precipitation map from the summed map statistics: frequency bias, ETS or mean bias at the
+    threshold; in a head-to-head (``pair``) either model's own map or the ETS difference."""
+    label = f"(≥ {threshold:g} {units}/24h)"
+    if pair:
+        if any(v is None for v in stats.values()):
+            return None
+        a, b = pair
+        if map_view == "ets_diff":
+            da = map_scores(stats[b], threshold)["ets"] - map_scores(stats[a], threshold)["ets"]
+            return build_spatial_map(da, "ets_diff", lead_time_h, region_bounds, region_name, units, view,
+                                     title=f"ETS {b.upper()} − {a.upper()} {label}",
+                                     colorbar_note=f"+ = {b.upper()} more skilful", variable="tp24")
+        metric, side = map_view.split(":")
+        which = a if side == "a" else b
+        title = f"{which.upper()} " + ("mean bias" if metric == "bias" else f"{_PRECIP_TITLES[metric]} {label}")
+        return build_spatial_map(map_scores(stats[which], threshold)[metric], metric, lead_time_h, region_bounds,
+                                 region_name, units, view, title=title, variable="tp24")
+    title = "Mean bias" if map_view == "bias" else f"{_PRECIP_TITLES[map_view]} {label}"
+    return build_spatial_map(map_scores(stats, threshold)[map_view], map_view, lead_time_h, region_bounds,
+                             region_name, units, view, title=title, variable="tp24")
+
+
+_PRECIP_TITLES = {"freq_bias": "Frequency bias", "ets": "ETS"}
+
+
 def _model_label(key: str) -> str:
     return " vs ".join(m.upper() for m in comparison_models(key)) if "_vs_" in key else key.upper()
 
@@ -107,6 +151,7 @@ inject_card_styles()
 
 cfg = load_config()
 all_rows = _load_region_table()
+all_categorical = _load_categorical_table()
 all_coverage = _load_coverage()
 
 if all_rows is None or all_coverage is None:
@@ -151,6 +196,10 @@ with st.sidebar:
                  if all(m in cfg.variables[v].models and any(k[:2] == (m, v) for k in in_source) for m in shown)]
     variable = st.selectbox("Variable", variables, format_func=lambda v: cfg.variables[v].long_name)
     has_acc = "acc" in cfg.variables[variable].scores
+    precip = "ets" in cfg.variables[variable].scores          # categorical verification (frequency bias, ETS)
+    if precip and all_categorical is None:
+        st.warning("No precipitation counts found in `data/dashboard/`.")
+        st.stop()
 
     domains = [d for d in cfg.enabled_domains() if all((m, variable, d) in in_source for m in shown)]
     domain = st.selectbox("Domain", domains)
@@ -162,9 +211,18 @@ with st.sidebar:
     b = regions[region_name]
     region_bounds = {"lat_min": b.lat_min, "lat_max": b.lat_max, "lon_min": b.lon_min, "lon_max": b.lon_max}
 
+    threshold = None
+    if precip:
+        st.divider()
+        threshold = render_threshold_selector(cfg.variables[variable].thresholds, units=cfg.variables[variable].units)
+
     st.divider()
-    if comparison:
+    if comparison and precip:
+        map_view = render_comparison_map_toggle(*pair, key="cmp_map_metric_precip", views=PRECIP_COMPARISON_MAP_VIEWS)
+    elif comparison:
         map_view = render_comparison_map_toggle(*pair)
+    elif precip:
+        map_view = render_map_toggle(key="map_metric_precip", categorical=True)
     else:
         map_view = render_map_toggle(has_acc=has_acc)
     full_domain = render_map_view_toggle()
@@ -175,7 +233,7 @@ with st.sidebar:
         months, key=f"months_{choice}_{variable}_{domain}")
 
     st.divider()
-    st.caption("v1.7 · October 2026")
+    st.caption("v1.8 · October 2026")
 
 units = cfg.variables[variable].units
 long_name = cfg.variables[variable].long_name
@@ -242,11 +300,23 @@ else:
 # Metrics for the selected window
 # ---------------------------------------------------------------------------
 
+def _precip_summary(m: str) -> pd.DataFrame:
+    """Frequency bias, ETS and event frequency at the chosen threshold (counts pooled over the window),
+    with the mean bias from the region table. One row per lead time."""
+    cat_src = all_categorical[all_categorical.comparison == comparison]
+    cat = cat_src[(cat_src.model == m) & (cat_src.variable == variable) & (cat_src.domain == domain)
+                  & (cat_src.region == region_name) & cat_src.month.isin(window) & (cat_src.threshold == threshold)]
+    scores = categorical_metrics(cat).drop(columns="threshold")
+    return scores.merge(summaries[m][["lead_time_h", "bias", "n_forecasts"]], on="lead_time_h")
+
+
 summaries = {}
 for m in shown:
     m_rows = source[(source.model == m) & (source.variable == variable) & (source.domain == domain)
                     & (source.region == region_name) & source.month.isin(window)]
     summaries[m] = region_metrics(m_rows)
+if precip:
+    summaries = {m: _precip_summary(m) for m in shown}
 
 if variable == "frzl":
     window_rows = source[(source.model == model) & (source.variable == variable) & (source.domain == domain)
@@ -255,14 +325,22 @@ if variable == "frzl":
 lead_time_h = render_lead_time_selector(cfg.lead_times_hours)
 st.markdown("---")
 for m in shown:
-    render_metric_cards(summaries[m], lead_time_h, units, title=m.upper() if comparison else None,
-                        variable=variable, has_acc=has_acc)
+    if precip:
+        render_precip_cards(summaries[m], lead_time_h, threshold, units, title=m.upper() if comparison else None)
+    else:
+        render_metric_cards(summaries[m], lead_time_h, units, title=m.upper() if comparison else None,
+                            variable=variable, has_acc=has_acc)
+if precip:
+    st.caption(PRECIP_NOTE)
 st.markdown("---")
 
 col_left, col_right = st.columns([3, 2], gap="medium")
 
 with col_left:
-    if comparison:
+    if precip:
+        fig = build_precip_curves(summaries, region_name, lead_times=cfg.lead_times_hours, units=units,
+                                  threshold=threshold)
+    elif comparison:
         fig = build_comparison_curves(summaries, region_name, lead_times=cfg.lead_times_hours, units=units)
     else:
         fig = build_skill_curves(summaries[model], region_name, lead_times=cfg.lead_times_hours, units=units,
@@ -283,7 +361,10 @@ with col_right:
     except MapUnavailable as exc:
         st.warning(f"Map data could not be downloaded: {exc}", icon="⚠️")
         stats = None
-    if stats is not None and comparison:
+    if stats is not None and precip:
+        map_fig = _precip_map_figure(stats, pair, model, map_view, threshold, lead_time_h, region_bounds,
+                                     region_name, units, view)
+    elif stats is not None and comparison:
         if all(v is not None for v in stats.values()):
             a_name, b_name = (m.upper() for m in pair)
             if map_view in ("rmse_diff", "acc_diff"):
@@ -321,7 +402,11 @@ with col_right:
             st.caption(f"Difference of the two models' grid-point temporal ACC over the same runs "
                        f"({pair[1].upper()} − {pair[0].upper()}); positive means {pair[1].upper()} had the "
                        f"higher correlation.")
-        st.caption("Map ACC is the temporal correlation of anomalies at each grid cell.")
+        if precip:
+            st.caption("Map scores come from each 0.25° cell's own counts over all forecasts of the year(s); "
+                       "cells with few observed events give noisy or undefined (blank) scores.")
+        else:
+            st.caption("Map ACC is the temporal correlation of anomalies at each grid cell.")
 
 # ---------------------------------------------------------------------------
 # Notes
@@ -331,10 +416,13 @@ with st.expander("How these numbers are computed"):
     st.markdown(
         "- **Truth:** ERA5 reanalysis (0.25°). ERA5 is not an observation; it is a model-assimilated estimate.\n"
         "- **Regional means** are weighted by cos(latitude) and pooled over all grid points and forecasts "
-        "(RMSE is the root of the pooled weighted mean squared error).\n"
-        "- **ACC** on the curves and cards is the *centred* spatial anomaly correlation, computed for each "
-        "forecast over the region and then averaged over forecasts. Anomalies are relative to the ERA5 "
-        "1991–2020 climatology by calendar month and hour of day. The skill reference line is ACC = 0.6.\n"
+        + ("(counts of hits, false alarms, misses and correct negatives are summed first; the scores are formed "
+           "from the sums).\n" if precip else
+           "(RMSE is the root of the pooled weighted mean squared error).\n"
+           "- **ACC** on the curves and cards is the *centred* spatial anomaly correlation, computed for each "
+           "forecast over the region and then averaged over forecasts. Anomalies are relative to the ERA5 "
+           "1991–2020 climatology by calendar month and hour of day. The skill reference line is ACC = 0.6.\n")
+        +
         "- **Same forecasts at every lead time:** a run is used only if every lead time has both a forecast "
         "and ERA5 data; excluded runs are counted above.\n"
         + ("- **Head-to-head:** only runs verified for both models are used, so both models are scored on "

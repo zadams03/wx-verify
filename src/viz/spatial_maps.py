@@ -4,6 +4,8 @@ import numpy as np
 import plotly.graph_objects as go
 import xarray as xr
 
+from src.viz.skill_curves import MIN_FREQ_BIAS_HALF_RANGE
+
 # Colour scales ------------------------------------------------------------------
 
 _RMSE_SCALE = "YlOrRd"
@@ -42,12 +44,26 @@ _DIFF_SCALE = [
 # level; other variables use scales that do not read as cold/warm.
 _BIAS_PRESSURE = [[0.0, "#7b3294"], [0.25, "#c2a5cf"], [0.5, "#f7f7f7"], [0.75, "#a6dba0"], [1.0, "#008837"]]
 _BIAS_WIND = [[0.0, "#01665e"], [0.25, "#80cdc1"], [0.5, "#f5f5f5"], [0.75, "#dfc27d"], [1.0, "#8c510a"]]
+_PRECIP_BIAS_SCALE = [[0.0, "#8c510a"], [0.25, "#dfc27d"], [0.5, "#f5f5f5"], [0.75, "#80cdc1"], [1.0, "#01665e"]]
 _BIAS_SCALES = {"t2m": _BIAS_SCALE, "frzl": _BIAS_SCALE, "msl": _BIAS_PRESSURE, "z500": _BIAS_PRESSURE,
-                "ws10": _BIAS_WIND}
+                "ws10": _BIAS_WIND, "tp24": _PRECIP_BIAS_SCALE}
 
-_SCALES = {"rmse": _RMSE_SCALE, "bias": _BIAS_SCALE, "acc": _ACC_SCALE, "rmse_diff": _DIFF_SCALE, "acc_diff": _DIFF_SCALE}
-_TITLES = {"rmse": "RMSE", "bias": "Bias", "acc": "ACC Skill", "rmse_diff": "RMSE difference", "acc_diff": "ACC difference"}
-_TICK_FMT = {"rmse": ".2f", "bias": ".2f", "acc": ".2f", "rmse_diff": "+.2f", "acc_diff": "+.2f"}
+# Precipitation. Frequency bias is centred on 1 (brown = the model has the event less often than ERA5,
+# teal = more often); ETS runs 0–1 with a grey band for 0 and below (no skill beyond chance).
+_FREQ_BIAS_SCALE = _PRECIP_BIAS_SCALE
+_ETS_SCALE = [[0.0, "#bdbdbd"], [0.004, "#ffffcc"], [0.35, "#a1dab4"], [0.7, "#2c7fb8"], [1.0, "#253494"]]
+
+_SCALES = {"rmse": _RMSE_SCALE, "bias": _BIAS_SCALE, "acc": _ACC_SCALE, "rmse_diff": _DIFF_SCALE, "acc_diff": _DIFF_SCALE,
+           "freq_bias": _FREQ_BIAS_SCALE, "ets": _ETS_SCALE, "ets_diff": _DIFF_SCALE}
+_TITLES = {"rmse": "RMSE", "bias": "Bias", "acc": "ACC Skill", "rmse_diff": "RMSE difference", "acc_diff": "ACC difference",
+           "freq_bias": "Frequency bias", "ets": "ETS", "ets_diff": "ETS difference"}
+_TICK_FMT = {"rmse": ".2f", "bias": ".2f", "acc": ".2f", "rmse_diff": "+.2f", "acc_diff": "+.2f",
+             "freq_bias": ".2f", "ets": ".2f", "ets_diff": "+.2f"}
+_UNITLESS = ("acc", "acc_diff", "freq_bias", "ets", "ets_diff")
+
+# ETS colour bar: label the grey band so 0 (and negative scores, which are clipped to it) is marked.
+_COLORBAR_TICKS = {"ets": dict(tickmode="array", tickvals=[0, 0.2, 0.4, 0.6, 0.8, 1.0],
+                               ticktext=["≤ 0", "0.2", "0.4", "0.6", "0.8", "1.0"])}
 
 _GEO_DEFAULTS = dict(
     scope="world",
@@ -118,7 +134,13 @@ def _color_range(da_vals: np.ndarray, metric: str) -> tuple[float, float]:
     valid = da_vals[~np.isnan(da_vals)]
     if metric == "acc":
         return 0.0, 1.0
-    if metric in ("bias", "rmse_diff", "acc_diff"):
+    if metric == "ets":
+        return 0.0, 1.0
+    if metric == "freq_bias":
+        half = float(np.nanpercentile(np.abs(valid - 1.0), 98)) if len(valid) else 1.0
+        half = min(1.0, max(MIN_FREQ_BIAS_HALF_RANGE, half))
+        return 1.0 - half, 1.0 + half
+    if metric in ("bias", "rmse_diff", "acc_diff", "ets_diff"):
         absmax = float(np.nanpercentile(np.abs(valid), 98)) if len(valid) else 1.0
         return -absmax, absmax
     lo = float(np.nanpercentile(valid, 2)) if len(valid) else 0.0
@@ -141,7 +163,8 @@ def build_spatial_map(
     """Plotly geographic scatter map of a single metric at a single lead time.
 
     metric_da: DataArray with dims (lead_time, latitude, longitude).
-    metric_name: 'rmse', 'bias', or 'acc' (temporal ACC at each grid cell), or a difference map.
+    metric_name: 'rmse', 'bias', or 'acc' (temporal ACC at each grid cell), a difference map, or for
+      precipitation 'freq_bias' (centred on 1), 'ets' (0–1, grey at 0 and below) or 'ets_diff'.
     units: display units for rmse and bias.
     view_bounds: lat/lon extent to show (a zoomed region or the whole domain). Only cells
       inside it are drawn. Defaults to the extent of the data.
@@ -150,7 +173,7 @@ def build_spatial_map(
       diverging scale; pass ``title`` (e.g. "RMSE GFS − ECMWF") and ``colorbar_note`` (what
       positive means).
     title: overrides the metric's default name in the figure and colour bar titles.
-    variable: selects the bias colour scale (see _BIAS_SCALES).
+    variable: selects the bias colour scale (see _BIAS_SCALES); precipitation bias uses _PRECIP_BIAS_SCALE.
     """
     da = metric_da.sel(lead_time=lead_time_h, method="nearest")
 
@@ -172,11 +195,11 @@ def build_spatial_map(
 
     colorscale = _BIAS_SCALES.get(variable, _BIAS_SCALE) if metric_name == "bias" else _SCALES[metric_name]
     title = title or _TITLES[metric_name]
-    units = "" if metric_name in ("acc", "acc_diff") else units
+    units = "" if metric_name in _UNITLESS else units
     cmin, cmax = _color_range(vals_f, metric_name)
 
     hover_unit = f" {units}" if units else ""
-    hover_fmt = (".3f" if metric_name == "acc" else "+.3f" if metric_name == "acc_diff"
+    hover_fmt = (".3f" if metric_name in ("acc", "ets") else "+.3f" if metric_name in ("acc_diff", "ets_diff")
                  else "+.2f" if metric_name in ("bias", "rmse_diff") else ".2f")
     colorbar_label = f"{title} ({units})" if units else title
     if colorbar_note:
@@ -203,6 +226,7 @@ def build_spatial_map(
                 len=0.75,
                 tickformat=_TICK_FMT[metric_name],
                 tickfont=dict(size=11),
+                **_COLORBAR_TICKS.get(metric_name, {}),
             ),
         ),
         hovertemplate=(

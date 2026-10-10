@@ -1,6 +1,8 @@
 """Dashboard tables (SPEC 4.4 items 3–4), built from the monthly aggregates.
 
   data/dashboard/region_monthly.parquet   region sums per model × variable × region × lead × month
+  data/dashboard/region_categorical.parquet  weighted contingency counts per region × lead × threshold × month
+                                           (precipitation)
   data/dashboard/coverage.parquet         run counts and included init times per month
   data/dashboard/maps/{model}/{variable}/{domain}/{YYYY}.nc   yearly grid sums at native resolution
 
@@ -22,6 +24,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from src.processing.categorical import COUNT_VARS
 from src.processing.metrics import combine_stats
 from src.processing.pairing import comparison_models, paired_source, read_pairings
 from src.utils import paths
@@ -29,7 +32,8 @@ from src.utils.config import Config
 
 logger = logging.getLogger(__name__)
 
-# What the maps need (temporal ACC, bias, RMSE); Σf′ and Σo′ are not required.
+# What the maps need (temporal ACC, bias, RMSE); Σf′ and Σo′ are not required. Precipitation
+# aggregates also carry the contingency counts (COUNT_VARS, per threshold).
 MAP_STAT_VARS = ("n", "sum_e", "sum_e2", "sum_fa2", "sum_oa2", "sum_fao")
 
 _COUNT_ATTRS = ("n_runs_total", "n_runs_included",
@@ -141,6 +145,33 @@ def _included_init(model: str, variable: str, domain: str, month: str, compariso
     return [t.strftime("%Y-%m-%dT%H") for t in df.loc[df["status"] == "included", "init_time"]]
 
 
+def build_categorical_table(cfg: Config) -> pd.DataFrame | None:
+    """Concatenate the monthly contingency-count files into data/dashboard/region_categorical.parquet.
+
+    Same ``comparison`` convention as the region table. None (and no file) when no precipitation
+    aggregate exists yet.
+    """
+    from src.processing.aggregate import categorical_path
+    frames = []
+    for f in _complete_months(cfg):
+        model, variable, domain = f.parts[-4], f.parts[-3], f.parts[-2]
+        cp = categorical_path(model, variable, domain, f.stem)
+        if cp.exists():
+            frames.append(pd.read_parquet(cp).assign(comparison=""))
+    for comparison, variable, domain, model, _, month, src in _paired_months(cfg):
+        cp = categorical_path(model, variable, domain, month, src)
+        if cp.exists():
+            frames.append(pd.read_parquet(cp).assign(comparison=comparison))
+    if not frames:
+        return None
+    df = pd.concat(frames, ignore_index=True)
+    for col in ("comparison", "model", "variable", "domain", "region", "month"):
+        df[col] = df[col].astype("category")
+    df = df.sort_values(["comparison", "model", "variable", "domain", "region", "threshold", "lead_time_h", "month"])
+    _write_parquet(df, paths.dashboard_dir() / "region_categorical.parquet")
+    return df
+
+
 def build_coverage_table(cfg: Config) -> pd.DataFrame:
     """Run counts per model and month, with the included init times (so pairing can
     compare actual run sets). Months without a recorded run list have ``None``.
@@ -183,12 +214,20 @@ def map_stats(total: xr.Dataset) -> xr.Dataset:
     ``n`` is stored per lead time when it is constant over the grid (always true
     under the homogeneous-sample rule), otherwise per grid point.
     """
-    out = total[list(MAP_STAT_VARS)]
+    out = total[list(MAP_STAT_VARS) + [v for v in COUNT_VARS if v in total]]
     n = out["n"]
     per_lead = n.isel(latitude=0, longitude=0, drop=True)
     if bool((n == per_lead).all()):
         out["n"] = per_lead
     return out
+
+
+def _map_dtypes(stats: xr.Dataset) -> xr.Dataset:
+    """float32 sums; contingency counts (at most one per forecast of a year) as int16."""
+    return xr.Dataset({
+        v: stats[v].astype("int16") if v in COUNT_VARS and float(stats[v].max()) <= np.iinfo("int16").max
+        else stats[v].astype("float32")
+        for v in stats.data_vars})
 
 
 def build_map_tables(cfg: Config, resolution: float) -> list:
@@ -237,7 +276,7 @@ def build_map_tables(cfg: Config, resolution: float) -> list:
                 f"dashboard.map_resolution={resolution} but the {domain} grid is {native}° — "
                 "maps are stored at native resolution"
             )
-        total = map_stats(combine_stats(parts)).astype("float32")
+        total = _map_dtypes(map_stats(combine_stats(parts)))
         total.attrs = dict(model=model, variable=variable, domain=domain, year=int(year),
                            n_months=len(files), n_runs_included=n_runs, resolution=native)
         if comparison:

@@ -380,11 +380,12 @@ def _rebuild_tables(cfg: Config) -> None:
     # Imported here so a long-running pipeline rebuilds with the table code on disk
     # when it finishes, not the version it was started with.
     from src.processing.tables import (
-        build_coverage_table, build_map_tables, build_region_table, check_size_budget,
+        build_categorical_table, build_coverage_table, build_map_tables, build_region_table, check_size_budget,
     )
     from src.data.map_store import build_manifest
     try:
         build_region_table(cfg)
+        build_categorical_table(cfg)
         build_coverage_table(cfg)
         build_map_tables(cfg, cfg.dashboard.map_resolution)
         manifest = build_manifest(cfg)

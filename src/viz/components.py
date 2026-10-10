@@ -13,7 +13,11 @@ __all__ = [
     "CENTRED_ACC_NOTE",
     "ERA5_LINEAGE_NOTE",
     "COMPARISON_MAP_VIEWS",
+    "PRECIP_COMPARISON_MAP_VIEWS",
+    "PRECIP_NOTE",
     "render_comparison_map_toggle",
+    "render_precip_cards",
+    "render_threshold_selector",
     "inject_card_styles",
     "render_metric_cards",
     "render_lead_time_selector",
@@ -45,6 +49,12 @@ _TERRAIN_NOTES = {
         "differ in height at 0.25°, and points where either source has the 0°C level at the surface are "
         "excluded, so part of the bias and error here reflects terrain representation, not forecast error."
     ),
+    "tp24": (
+        "Mountain region: precipitation in the forecast models and in ERA5 depends strongly on how each "
+        "represents the terrain at 0.25°, and ERA5 precipitation is a weak truth in complex terrain, so "
+        "part of the frequency bias, ETS and mean bias here reflects the reference and terrain "
+        "representation, not forecast error."
+    ),
 }
 
 
@@ -62,6 +72,15 @@ VARIABLE_NOTES = {
         "verification, so bias and RMSE are for the scalar speed, not the vector. The ACC climatology is "
         "the mean of ERA5 wind *speed* (not the speed of the mean wind), 1991–2020."
     ),
+    "tp24": (
+        "24h precipitation is the total over the 24 hours *ending* at the lead time, from each model's "
+        "accumulation (the accumulation at the lead minus the one 24 h earlier) and, in ERA5, the sum of "
+        "the 24 hourly values. An event is a total at or above the threshold in the forecast and in ERA5. "
+        "Frequency bias is forecast events ÷ observed events (1 = unbiased); ETS is the equitable threat "
+        "score, hits corrected for those expected by chance (1 = perfect, 0 = no skill beyond chance). "
+        "Counts are weighted by cos(latitude) and pooled over grid points and forecasts. ERA5 precipitation "
+        "is a model product, a weaker truth than ERA5 temperature or pressure, especially in complex terrain."
+    ),
     "frzl": (
         "Freezing level is the height of the 0°C level above sea level: the GFS highest tropospheric "
         "freezing level, compared with ERA5's zero-degree level (given above ground, converted with ERA5 "
@@ -77,6 +96,12 @@ def freezing_level_note(masked_fraction: float) -> str:
     return (f"Freezing level: {masked_fraction:.1%} of this region's grid-point forecasts are excluded "
             "because ERA5 or GFS (or both) has the 0°C level at the surface (sub-zero surface).")
 
+
+PRECIP_NOTE = (
+    "Precipitation events are 24h totals at or above the selected threshold, in the forecast and in ERA5. "
+    "Frequency bias is forecast events ÷ observed events (1 = unbiased); ETS is 1 for a perfect forecast "
+    "and 0 for no skill beyond chance. There is no ACC or RMSE for precipitation."
+)
 
 CENTRED_ACC_NOTE = (
     "ACC is centred: each forecast's regional mean anomaly is removed before correlating. "
@@ -152,7 +177,7 @@ def _card(
 
 
 # Bias below this size (in the variable's units) is shown as "near zero".
-_NEAR_ZERO_BIAS = {"t2m": 0.05, "msl": 0.05, "z500": 0.5, "ws10": 0.05, "frzl": 5.0}
+_NEAR_ZERO_BIAS = {"t2m": 0.05, "msl": 0.05, "z500": 0.5, "ws10": 0.05, "frzl": 5.0, "tp24": 0.02}
 _BIAS_WORDS = {"t2m": ("Warm bias", "Cold bias")}
 
 
@@ -212,6 +237,45 @@ def render_metric_cards(summary_df: pd.DataFrame, lead_time_h: int, units: str =
             st.markdown(card, unsafe_allow_html=True)
 
 
+def render_precip_cards(summary_df: pd.DataFrame, lead_time_h: int, threshold: float, units: str = "mm",
+                        title: str | None = None) -> None:
+    """Cards for precipitation at one lead time and threshold: frequency bias, ETS, mean bias, and the
+    observed event frequency (how often ERA5 reaches the threshold, for context).
+
+    summary_df: columns lead_time_h, freq_bias, ets, bias, obs_frequency (one threshold).
+    """
+    if title:
+        st.markdown(f"**{title}**")
+    candidates = summary_df[summary_df["lead_time_h"] == lead_time_h]
+    row = (candidates.iloc[0] if not candidates.empty
+           else summary_df.loc[(summary_df["lead_time_h"] - lead_time_h).abs().idxmin()])
+    fb, ets_, bias, obs_freq = (float(row[c]) for c in ("freq_bias", "ets", "bias", "obs_frequency"))
+    sub = f"≥ {threshold:g} {units}/24h at {lead_time_h}h lead"
+
+    def fmt(x: float, f: str) -> str:
+        return "n/a" if x != x else format(x, f)
+
+    c_fb, c_ets, c_bias, c_obs = st.columns(4)
+    with c_fb:
+        word = "n/a" if fb != fb else "Over-forecast" if fb > 1.05 else "Under-forecast" if fb < 0.95 else "Near unbiased"
+        st.markdown(_card("Frequency bias", fmt(fb, ".2f"), sub=f"{word} events"), unsafe_allow_html=True)
+    with c_ets:
+        st.markdown(_card("ETS", fmt(ets_, ".3f"), sub=sub), unsafe_allow_html=True)
+    with c_bias:
+        near = _NEAR_ZERO_BIAS["tp24"]
+        word = "Too wet" if bias > near else "Too dry" if bias < -near else "Near-zero bias"
+        st.markdown(_card("Mean bias", f"{bias:+.2f} {units}/24h", sub=word), unsafe_allow_html=True)
+    with c_obs:
+        st.markdown(_card("ERA5 event frequency", fmt(100 * obs_freq, ".1f") + " %", sub=sub),
+                    unsafe_allow_html=True)
+
+
+def render_threshold_selector(thresholds: list[float], units: str = "mm", key: str = "threshold") -> float:
+    """Precipitation threshold selector (config ``thresholds``). Returns the chosen threshold."""
+    labels = {f"{t:g} {units}/24h": t for t in thresholds}
+    return labels[st.radio("Precipitation threshold", list(labels), key=key)]
+
+
 def render_lead_time_selector(lead_times: list[int], key: str = "lt") -> int:
     """Segmented button row for lead time selection. Returns selected lead time in hours."""
     options = [f"{lt}h" for lt in lead_times]
@@ -226,9 +290,11 @@ def render_lead_time_selector(lead_times: list[int], key: str = "lt") -> int:
     return int(selected.replace("h", ""))
 
 
-def render_map_toggle(key: str = "map_metric", has_acc: bool = True) -> str:
-    """Toggle for spatial map metric. Returns 'rmse', 'bias', or 'acc' (not offered without ACC)."""
-    labels = {"RMSE": "rmse", "Bias": "bias"} | ({"ACC Skill": "acc"} if has_acc else {})
+def render_map_toggle(key: str = "map_metric", has_acc: bool = True, categorical: bool = False) -> str:
+    """Toggle for spatial map metric. Returns 'rmse', 'bias', or 'acc' (not offered without ACC); for
+    precipitation (``categorical``) 'freq_bias', 'ets' or 'bias' (mean bias)."""
+    labels = ({"Frequency bias": "freq_bias", "ETS": "ets", "Mean bias": "bias"} if categorical else
+              {"RMSE": "rmse", "Bias": "bias"} | ({"ACC Skill": "acc"} if has_acc else {}))
     selected = st.radio(
         "Map view",
         list(labels.keys()),
@@ -247,9 +313,22 @@ COMPARISON_MAP_VIEWS = {
 }
 
 
-def render_comparison_map_toggle(model_a: str, model_b: str, key: str = "cmp_map_metric") -> str:
-    """Map view for a head-to-head. Returns 'rmse_diff', 'acc_diff', 'bias:a' or 'bias:b'."""
-    labels = {v.format(a=model_a.upper(), b=model_b.upper()): k for k, v in COMPARISON_MAP_VIEWS.items()}
+# The same for precipitation: ETS difference oriented like ACC (B − A: positive = B better).
+PRECIP_COMPARISON_MAP_VIEWS = {
+    "ets_diff": "ETS difference ({b} − {a})",
+    "freq_bias:a": "Frequency bias — {a}",
+    "freq_bias:b": "Frequency bias — {b}",
+    "bias:a": "Mean bias — {a}",
+    "bias:b": "Mean bias — {b}",
+}
+
+
+def render_comparison_map_toggle(model_a: str, model_b: str, key: str = "cmp_map_metric",
+                                 views: dict[str, str] | None = None) -> str:
+    """Map view for a head-to-head. Returns 'rmse_diff', 'acc_diff', 'bias:a' or 'bias:b' (``views`` =
+    PRECIP_COMPARISON_MAP_VIEWS: 'ets_diff', 'freq_bias:a' …)."""
+    views = views or COMPARISON_MAP_VIEWS
+    labels = {v.format(a=model_a.upper(), b=model_b.upper()): k for k, v in views.items()}
     return labels[st.radio("Map view", list(labels), key=key)]
 
 
