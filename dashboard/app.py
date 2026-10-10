@@ -43,6 +43,7 @@ from src.viz.components import (
     render_month_range_selector,
     render_precip_cards,
     render_threshold_selector,
+    swe_note,
     terrain_note,
 )
 from src.viz.skill_curves import build_comparison_curves, build_precip_curves, build_skill_curves
@@ -322,6 +323,10 @@ if variable == "frzl":
     window_rows = source[(source.model == model) & (source.variable == variable) & (source.domain == domain)
                          & (source.region == region_name) & source.month.isin(window)]
     st.caption(freezing_level_note(masked_fraction(window_rows)))
+elif variable == "swe":
+    window_rows = source[(source.model == model) & (source.variable == variable) & (source.domain == domain)
+                         & (source.region == region_name) & source.month.isin(window)]
+    st.caption(swe_note(masked_fraction(window_rows)))
 lead_time_h = render_lead_time_selector(cfg.lead_times_hours)
 st.markdown("---")
 for m in shown:

@@ -10,6 +10,7 @@ __all__ = [
     "terrain_note",
     "VARIABLE_NOTES",
     "freezing_level_note",
+    "swe_note",
     "CENTRED_ACC_NOTE",
     "ERA5_LINEAGE_NOTE",
     "COMPARISON_MAP_VIEWS",
@@ -49,6 +50,11 @@ _TERRAIN_NOTES = {
         "differ in height at 0.25°, and points where either source has the 0°C level at the surface are "
         "excluded, so part of the bias and error here reflects terrain representation, not forecast error."
     ),
+    "swe": (
+        "Mountain region: snow water equivalent depends on how each model and ERA5 represent terrain height "
+        "and snow cover at 0.25°, and ERA5 snow is a weak truth in complex terrain and on glaciers, so part "
+        "of the bias and error here reflects the reference and terrain representation, not forecast error."
+    ),
     "tp24": (
         "Mountain region: precipitation in the forecast models and in ERA5 depends strongly on how each "
         "represents the terrain at 0.25°, and ERA5 precipitation is a weak truth in complex terrain, so "
@@ -72,6 +78,13 @@ VARIABLE_NOTES = {
         "verification, so bias and RMSE are for the scalar speed, not the vector. The ACC climatology is "
         "the mean of ERA5 wind *speed* (not the speed of the mean wind), 1991–2020."
     ),
+    "swe": (
+        "Snow water equivalent (mm of water) is the GFS water equivalent of the snow on the ground (`WEASD`) "
+        "compared with ERA5 snow depth (given in metres of water equivalent). GFS has no value over open "
+        "water, so those points are left out of the sample, and the excluded share is shown. ECMWF is not "
+        "included: its open data has snow depth only from November 2025. ERA5 snow is a model product and a "
+        "weaker truth than ERA5 temperature or pressure, especially in complex terrain and on glaciers."
+    ),
     "tp24": (
         "24h precipitation is the total over the 24 hours *ending* at the lead time, from each model's "
         "accumulation (the accumulation at the lead minus the one 24 h earlier) and, in ERA5, the sum of "
@@ -90,6 +103,12 @@ VARIABLE_NOTES = {
         "excluded share grows with lead time and the curves are not a strictly homogeneous sample."
     ),
 }
+
+
+def swe_note(excluded_fraction: float) -> str:
+    """Sample note for snow water equivalent, with the excluded share of this region and window."""
+    return (f"Snow water equivalent: {excluded_fraction:.1%} of this region's grid-point forecasts are "
+            "excluded because GFS has no snow value there (open water).")
 
 
 def freezing_level_note(masked_fraction: float) -> str:
@@ -178,7 +197,7 @@ def _card(
 
 
 # Bias below this size (in the variable's units) is shown as "near zero".
-_NEAR_ZERO_BIAS = {"t2m": 0.05, "msl": 0.05, "z500": 0.5, "ws10": 0.05, "frzl": 5.0, "tp24": 0.02}
+_NEAR_ZERO_BIAS = {"t2m": 0.05, "msl": 0.05, "z500": 0.5, "ws10": 0.05, "frzl": 5.0, "tp24": 0.02, "swe": 0.5}
 _BIAS_WORDS = {"t2m": ("Warm bias", "Cold bias")}
 
 

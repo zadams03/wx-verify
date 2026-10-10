@@ -52,6 +52,7 @@ def aggregate_month(
     ident: dict[str, str],
     masked: bool = False,
     thresholds: list[float] | None = None,
+    mask_kind: str = "surface",
 ) -> MonthAggregate:
     """Aggregate one month. ``ident`` supplies model, variable, domain, month (YYYY-MM).
 
@@ -63,6 +64,9 @@ def aggregate_month(
     its level is at or below that are dropped. Dropped points leave every sum; the grid
     statistics keep their count (``n_masked``) and the region table the weight each side
     excluded (ERA5 only / GFS only / both) beside ``sum_w_all``.
+
+    ``mask_kind`` "undefined" (snow water equivalent) defines the sample by where both fields have a
+    value — GFS has none over open water — instead of by the surface height; those points are counted the same way.
 
     ``thresholds`` (precipitation): contingency counts at those thresholds join the grid statistics
     (unweighted, with Σforecast and ΣERA5) and, weighted by cos(lat), the ``categorical`` table; the
@@ -84,9 +88,12 @@ def aggregate_month(
 
     era5_bad = gfs_bad = None
     if masked:
-        if "surface_height" not in fc.coords:
-            raise ValueError("masked variable but the forecast has no surface_height coord")
-        era5_bad, gfs_bad = symmetric_mask(fc, obs, fc["surface_height"])
+        if mask_kind == "undefined":
+            era5_bad, gfs_bad = obs.isnull(), fc.isnull()
+        else:
+            if "surface_height" not in fc.coords:
+                raise ValueError("masked variable but the forecast has no surface_height coord")
+            era5_bad, gfs_bad = symmetric_mask(fc, obs, fc["surface_height"])
         fc = fc.where(~gfs_bad)
         obs = obs.where(~gfs_bad)
 

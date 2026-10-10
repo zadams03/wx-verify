@@ -62,9 +62,12 @@ def ensure_climatology(cfg: Config, variable: str, domain: str):
     return load_climatology(variable, domain)
 
 
-def _thresholds(cfg: Config, variable: str) -> list[float] | None:
-    """Event thresholds for a variable verified by contingency counts (precipitation), else None."""
-    return cfg.variables[variable].thresholds if "ets" in cfg.variables[variable].scores else None
+def _aggregation_args(cfg: Config, variable: str) -> dict:
+    """How aggregate_month samples and scores a variable: its mask, and the event thresholds when it is
+    verified by contingency counts (precipitation)."""
+    spec = get_variable(variable)
+    return {"masked": spec.masked, "mask_kind": spec.mask or "surface",
+            "thresholds": cfg.variables[variable].thresholds if "ets" in cfg.variables[variable].scores else None}
 
 
 def era5_months(init_dates: list[date], lead_times: list[int]) -> list[tuple[int, int]]:
@@ -160,7 +163,7 @@ def process_month(
     obs = era5.load_truth(era5_files, variable)
 
     agg = aggregate_month(forecast, obs, clim, cfg.domains[domain].regions, ident,
-                          masked=get_variable(variable).masked, thresholds=_thresholds(cfg, variable))
+                          **_aggregation_args(cfg, variable))
     write_aggregate(agg, ident)
     logger.info("Aggregated %s %s %s %s: %s", model, variable, domain, label, agg.counts)
 
@@ -247,7 +250,7 @@ def _write_comparison_month(cfg, comparison, models, fetchers, variable, domain,
         forecast = forecast.sel(init_time=paired.values.astype("datetime64[ns]"))
         ident = {"model": m, "variable": variable, "domain": domain, "month": label}
         agg = aggregate_month(forecast, obs, clim, cfg.domains[domain].regions, ident,
-                              masked=get_variable(variable).masked, thresholds=_thresholds(cfg, variable))
+                              **_aggregation_args(cfg, variable))
         write_aggregate(agg, ident, comparison=comparison)
         logger.info("Aggregated %s %s %s %s %s (paired): %s", comparison, m, variable, domain, label, agg.counts)
 

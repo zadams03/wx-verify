@@ -24,7 +24,7 @@ variables:
   ws10: {long_name: "10m wind speed", units: "m/s", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: true}
   frzl: {long_name: "Freezing level", units: "m", scores: [bias, rmse], models: [gfs], enabled: true}
   tp24: {long_name: "24h precipitation", units: "mm", scores: [freq_bias, ets, bias], thresholds: [1, 5, 10], models: [gfs, ecmwf], enabled: true}
-  swe:  {long_name: "Snow water equivalent", units: "mm", scores: [bias, rmse], models: [gfs, ecmwf], enabled: false}
+  swe:  {long_name: "Snow water equivalent", units: "mm", scores: [bias, rmse], models: [gfs], enabled: false}   # ECMWF parked: open data has sd only from 2025-11-20
 
 domains:
   europe:

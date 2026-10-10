@@ -166,6 +166,11 @@ class VariableSpec:
     gfs: GFSField | SpeedField | MaskedLevelField | AccumulationField | None = None
     ecmwf: ECMWFField | SpeedField | AccumulationField | None = None
     era5: ERA5Field | None = None
+    # How the verification sample is defined by the sources, for variables that are not defined everywhere:
+    # "surface" — both sources must put the field above their own surface (freezing level);
+    # "undefined" — a point is verified only where the forecast is defined (snow water equivalent: GFS has
+    # no value over open water). None: every point and forecast counts.
+    mask: str | None = None
 
     @property
     def accumulated(self) -> bool:
@@ -174,8 +179,8 @@ class VariableSpec:
 
     @property
     def masked(self) -> bool:
-        """True when the verification sample varies by point and time (freezing level)."""
-        return self.era5 is not None and self.era5.derive == "freezing_level"
+        """True when the verification sample varies by point and time (freezing level, snow)."""
+        return self.mask is not None
 
     def source_field(self, source: str
                      ) -> GFSField | ECMWFField | SpeedField | MaskedLevelField | AccumulationField | ERA5Field:
@@ -255,6 +260,16 @@ VARIABLES: dict[str, VariableSpec] = {
         ),
         era5=ERA5Field(("zero_degree_level", "geopotential"), ("deg0l", "z"),
                        derive="freezing_level", climatology=None),
+        mask="surface",
+    ),
+    "swe": VariableSpec(
+        key="swe",
+        valid_range=(-1.0, 15000.0),    # mm of water; ERA5 holds up to ~10 m on glaciers
+        # GFS WEASD (kg m⁻² = mm) is missing over open water; ERA5 `sd` (m of water equivalent) is defined
+        # everywhere (0 over sea). ECMWF open data has `sd` only from 2025-11-20, so ECMWF is parked.
+        gfs=GFSField("WEASD", "surface", {"typeOfLevel": "surface"}, "sdwe"),
+        era5=ERA5Field(("snow_depth",), ("sd",), conversion=_M_TO_MM, climatology=None),
+        mask="undefined",
     ),
     "tp24": VariableSpec(
         key="tp24",

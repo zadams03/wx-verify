@@ -527,3 +527,76 @@ def test_hand_check_of_one_region_threshold_and_lead():
     row = agg.categorical.query("region == 'All' and lead_time_h == 72 and threshold == 5.0").iloc[0]
     for k, v in want.items():
         assert row[k] == pytest.approx(v, rel=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# Snow water equivalent (GFS only): sample defined where GFS has a value
+# ---------------------------------------------------------------------------
+
+def test_swe_registry_entry_is_gfs_only_and_masked_where_undefined():
+    spec = get_variable("swe")
+    assert spec.gfs.idx_name == "WEASD" and spec.gfs.idx_level == "surface" and spec.ecmwf is None
+    assert spec.masked and spec.mask == "undefined" and not spec.accumulated
+    assert spec.era5.short_name == "sd" and spec.era5.conversion.apply(0.5) == pytest.approx(500.0)   # m w.e. -> mm
+    assert get_variable("frzl").mask == "surface" and get_variable("t2m").mask is None
+    assert CFG.variables["swe"].models == ["gfs"] and CFG.variables["swe"].scores == ["bias", "rmse"]
+
+
+def test_gfs_weasd_is_matched_on_the_instantaneous_step():
+    idx = "577:100:d=2024011500:WEASD:surface:24 hour fcst:\n578:200:d=2024011500:SNOD:surface:24 hour fcst:"
+    assert find_byte_range(idx, get_variable("swe").gfs, 24) == (100, 199)
+
+
+def _swe_raw(root_fetcher, nan_water=True):
+    path = root_fetcher.raw_path("swe", "europe", 2024, 3)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = np.full((1, len(LEADS), 2, 2), 5.0, "float32")
+    if nan_water:
+        data[..., 1, 1] = np.nan                                   # an open-water point
+    xr.Dataset({"data": (("init_time", "lead_time", "latitude", "longitude"), data),
+                "present": (("init_time", "lead_time"), np.ones((1, len(LEADS)), "int8"))},
+               coords={"init_time": pd.date_range("2024-03-01", periods=1), "lead_time": LEADS,
+                       "latitude": LAT, "longitude": LON}).to_netcdf(path)
+    return path
+
+
+def test_missing_values_over_water_do_not_fail_swe_validation_but_an_empty_field_does(root):  # noqa: F811
+    f = GFSFetcher(CFG)
+    f.validate(_swe_raw(f), "swe", "europe")
+    path = f.raw_path("swe", "europe", 2024, 3)
+    with xr.open_dataset(path) as ds:
+        empty = ds.load().assign(data=ds["data"] * np.nan)
+    path.unlink()
+    empty.to_netcdf(path)
+    with pytest.raises(ValueError, match="every value is missing"):
+        f.validate(path, "swe", "europe")
+
+
+def test_undefined_values_still_fail_validation_for_other_variables(root):  # noqa: F811
+    f = GFSFetcher(CFG)
+    path = _swe_raw(f)
+    new = f.raw_path("t2m", "europe", 2024, 3)
+    path.rename(new)
+    with pytest.raises(ValueError, match="NaN inside fields"):
+        f.validate(new, "t2m", "europe")
+
+
+def test_swe_aggregate_counts_water_points_as_masked_and_scores_the_rest():
+    inits = pd.date_range("2024-03-01", periods=4, freq="12h")
+    rng = np.random.default_rng(7)
+    fc, obs = _month(8, inits)
+    fc = fc.copy(data=(fc.values * 0 + rng.uniform(0, 50, fc.shape)).astype("float32"))
+    fc[..., 1, 1] = np.nan                                         # one of four points is water in every forecast
+    ident = {"model": "gfs", "variable": "swe", "domain": "europe", "month": "2024-03"}
+    agg = aggregate_month(fc, obs, None, {"All": Bounds(50.5, 51.0, 0.0, 0.25)}, ident, masked=True,
+                          mask_kind="undefined")
+    validate_aggregate(agg)
+    s = agg.stats
+    assert s["n"].isel(lead_time=0, latitude=1, longitude=1) == 0
+    assert s["n_masked"].isel(lead_time=0, latitude=1, longitude=1) == len(inits)
+    assert (s["n"].isel(lead_time=0, latitude=0, longitude=0) == len(inits))
+    r = agg.regions
+    w = np.cos(np.deg2rad(np.array(LAT)))
+    assert r["sum_w_gfs_only"].iloc[0] == pytest.approx(len(inits) * w[1])       # ERA5 has a value there
+    assert r["sum_w_era5_only"].iloc[0] == 0 and r["sum_w_both"].iloc[0] == 0
+    assert r["sum_w"].iloc[0] + r["sum_w_gfs_only"].iloc[0] == pytest.approx(r["sum_w_all"].iloc[0])

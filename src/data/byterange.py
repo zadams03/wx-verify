@@ -298,7 +298,11 @@ class ByteRangeFetcher(BaseFetcher):
             if not present.any():
                 raise ValueError(f"{path.name}: no fields present")
             vals = ds.data.values[present]
-            if np.isnan(vals).any():
+            if spec.mask == "undefined":      # undefined over some points by design (e.g. open water)
+                if np.isnan(vals).all():
+                    raise ValueError(f"{path.name}: every value is missing")
+                vals = vals[~np.isnan(vals)]
+            elif np.isnan(vals).any():
                 raise ValueError(f"{path.name}: NaN inside fields marked present")
             if "surface" in ds:
                 surf = ds.surface.values[present]

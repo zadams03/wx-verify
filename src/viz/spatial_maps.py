@@ -46,7 +46,7 @@ _BIAS_PRESSURE = [[0.0, "#7b3294"], [0.25, "#c2a5cf"], [0.5, "#f7f7f7"], [0.75, 
 _BIAS_WIND = [[0.0, "#01665e"], [0.25, "#80cdc1"], [0.5, "#f5f5f5"], [0.75, "#dfc27d"], [1.0, "#8c510a"]]
 _PRECIP_BIAS_SCALE = [[0.0, "#8c510a"], [0.25, "#dfc27d"], [0.5, "#f5f5f5"], [0.75, "#80cdc1"], [1.0, "#01665e"]]
 _BIAS_SCALES = {"t2m": _BIAS_SCALE, "frzl": _BIAS_SCALE, "msl": _BIAS_PRESSURE, "z500": _BIAS_PRESSURE,
-                "ws10": _BIAS_WIND, "tp24": _PRECIP_BIAS_SCALE}
+                "ws10": _BIAS_WIND, "tp24": _PRECIP_BIAS_SCALE, "swe": _PRECIP_BIAS_SCALE}
 
 # Precipitation. Frequency bias is centred on 1 (brown = the model has the event less often than ERA5,
 # teal = more often); ETS runs 0–1 with a grey band for 0 and below (no skill beyond chance).
