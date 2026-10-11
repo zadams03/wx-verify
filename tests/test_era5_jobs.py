@@ -26,6 +26,9 @@ class FakeRemote:
 
     def download(self, target):
         self.service.downloads.append(self.request_id)
+        if self.outcome == "reject":
+            self.status = "rejected"
+            raise RuntimeError("400 Client Error: The job has been rejected (queue limit)")
         if self.service.gate is not None:
             self.service.gate.wait(5)
         if self.outcome == "fail":
@@ -202,3 +205,25 @@ def test_missing_geopotential_without_a_stored_orography_is_an_error(cds, monkey
     monkeypatch.setattr(FakeRemote, "download", no_z)
     with pytest.raises(ValueError, match="orography"):
         ERA5Fetcher(CFG).ensure_months(["frzl"], "europe", [(2023, 1)], [0, 12])
+
+
+def test_a_rejected_job_is_resubmitted_after_a_wait_and_not_counted_as_a_failure(cds, monkeypatch):
+    waits = []
+    monkeypatch.setattr(era5_fetcher.time, "sleep", lambda s: waits.append(s))
+    service = cds(lambda req, n: "reject" if n < 3 else "ok")
+    ERA5Fetcher(CFG).ensure_months(["msl"], "europe", [(2023, 1)], [0, 12])
+    assert len(service.submitted) == 4 and waits == [era5_fetcher.REJECTED_WAIT_S] * 3
+    assert ERA5Fetcher(CFG).raw_path("msl", "europe", 2023, 1).exists()
+
+
+def test_a_stored_job_id_that_was_rejected_is_not_reattached(cds, monkeypatch):
+    monkeypatch.setattr(era5_fetcher.time, "sleep", lambda s: None)
+    service = cds(lambda req, n: "reject" if n == 0 else "ok")
+    f = ERA5Fetcher(CFG)
+    with pytest.raises(Exception):
+        monkeypatch.setattr(era5_fetcher, "MAX_REJECTIONS", 0)
+        f.ensure_months(["msl"], "europe", [(2023, 1)], [0, 12])
+    monkeypatch.setattr(era5_fetcher, "MAX_REJECTIONS", 400)
+    era5_fetcher._INFLIGHT.clear()
+    f.ensure_months(["msl"], "europe", [(2023, 1)], [0, 12])          # a restarted run: new job, no reattach
+    assert len(service.submitted) == 2
