@@ -269,7 +269,7 @@ VARIABLES: dict[str, VariableSpec] = {
     ),
     "z500": VariableSpec(
         key="z500",
-        valid_range=(4500.0, 6200.0),
+        valid_range=(4400.0, 6200.0),
         gfs=GFSField("HGT", "500 mb", {"typeOfLevel": "isobaricInhPa", "level": 500},
                      "gh", ncss=NCSSField("Geopotential_height_isobaric", "gpm", vert=50000.0)),
         ecmwf=ECMWFField("gh", "pl", {"typeOfLevel": "isobaricInhPa", "level": 500}, "gh",
@@ -279,7 +279,7 @@ VARIABLES: dict[str, VariableSpec] = {
     ),
     "ws10": VariableSpec(
         key="ws10",
-        valid_range=(0.0, 90.0),
+        valid_range=(0.0, 75.0),
         gfs=SpeedField(
             u=GFSField("UGRD", "10 m above ground", {"typeOfLevel": "heightAboveGround", "level": 10}, "u10",
                        ncss=NCSSField("u-component_of_wind_height_above_ground", "m/s", vert=10.0)),
@@ -345,3 +345,28 @@ def get_variable(key: str) -> VariableSpec:
             f"Variable '{key}' is not in the variable registry "
             f"(registered: {sorted(VARIABLES)})"
         ) from None
+
+
+SURFACE_HEIGHT_RANGE = (-500.0, 9000.0)     # m; a model's surface height (the freezing-level mask)
+
+
+def part_ranges(spec: VariableSpec, source: str = "gfs") -> list[tuple[Any, tuple[float, float]]]:
+    """Plausible values of each field a variable's forecast is built from, in that field's own (source)
+    units: the variable's ``valid_range`` carried back through the field's conversion. A wind component
+    lies within ± the speed limit and a surface height within SURFACE_HEIGHT_RANGE. Used to reject one
+    downloaded field before it reaches a raw file (Phase 12). Returns (field, (lo, hi)) pairs."""
+    lo, hi = spec.valid_range
+    entry = spec.source_field(source)
+
+    def back(f) -> tuple[float, float]:
+        c = f.conversion
+        a, b = (lo - c.offset) / c.scale, (hi - c.offset) / c.scale
+        return (min(a, b), max(a, b))
+
+    if isinstance(entry, SpeedField):
+        return [(entry.u, (-hi, hi)), (entry.v, (-hi, hi))]
+    if isinstance(entry, MaskedLevelField):
+        return [(entry.level, back(entry.level)), (entry.surface, SURFACE_HEIGHT_RANGE)]
+    if isinstance(entry, AccumulationField):
+        return [(entry.field, back(entry.field))]
+    return [(entry, back(entry))]

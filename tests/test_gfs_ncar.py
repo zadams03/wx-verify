@@ -1,6 +1,7 @@
 """Phase 12: GFS long record from NCAR d084001 through THREDDS NCSS (mocked; live checks skip offline)."""
 from __future__ import annotations
 
+import time
 from datetime import date, datetime
 
 import numpy as np
@@ -106,8 +107,11 @@ def test_decode_refuses_a_response_that_is_not_the_field_asked_for(kw, match):
 
 
 @pytest.fixture(autouse=True)
-def _every_file_listed(monkeypatch):
+def _every_file_listed(monkeypatch, tmp_path):
+    """Every file listed, no duplicate checks (tests that want them turn them on), locks in a temp folder."""
     monkeypatch.setattr(ncar, "listed_files", lambda session, d: None)
+    monkeypatch.setattr(ncar, "DUPLICATE_FRACTION", 0.0)
+    monkeypatch.setattr(ncar, "_lock_dir", lambda: tmp_path / "locks")
 
 
 def test_a_file_the_archive_does_not_list_is_missing_without_retries(monkeypatch):
@@ -205,8 +209,9 @@ def test_windowed_runs_are_taken_as_they_are_and_others_are_differenced():
 
 
 def _fake_ncss(missing=()):
-    """download_field stand-in: every bucket holds 1 mm, the 0→N accumulation holds N/24 mm, t2m 280 K."""
-    def fake(session, d, r, step, field, bounds, bucket=False):
+    """download_field stand-in: every bucket holds 1 mm, the 0→N accumulation holds N/24 mm, wind components
+    5 m/s, anything else 280."""
+    def fake(session, d, r, step, field, bounds, bucket=False, alone=False):
         if (d, r, step) in missing:
             raise ncar.TransientFetchError("404")
         init = f"{d} {r:02d}:00"
@@ -215,7 +220,8 @@ def _fake_ncss(missing=()):
                 return _ncss(field.ncss.bucket_var, np.ones((3, 3)), init, step, "kg.m-2", intervals=[(step - 6, step)])
             return _ncss(field.ncss.var, np.full((3, 3), step / 24), init, step, "kg.m-2",
                          intervals=[(0, step), (step - 6, step)])
-        return _ncss(field.ncss.var, np.full((3, 3), 280.0), init, step, field.ncss.units,
+        value = 5.0 if field.ncss.units == "m/s" else 280.0
+        return _ncss(field.ncss.var, np.full((3, 3), value), init, step, field.ncss.units,
                      ("height_above_ground1", field.ncss.vert))
     return fake
 
@@ -250,6 +256,138 @@ def test_other_variables_come_from_ncar_on_the_domain_grid(root, box_cfg, monkey
     f.validate(path, "t2m", "europe")
     t = f.load(path, "t2m")
     assert t.longitude.values.tolist() == [-0.25, 0.0, 0.25] and np.allclose(t.values, 280.0 - 273.15)
+
+
+# ---------------------------------------------------------------------------
+# Integrity checks: duplicate copies, plausible ranges
+# ---------------------------------------------------------------------------
+
+T2M_OK = np.full((3, 3), 280.0, "float32")
+
+
+def _t2m(values=T2M_OK) -> bytes:
+    return _ncss(T2M.ncss.var, values, "2016-01-15", 24, "K", ("height_above_ground1", 2.0))
+
+
+def test_about_two_percent_of_requests_are_duplicated_and_always_the_same_ones(monkeypatch):
+    monkeypatch.setattr(ncar, "DUPLICATE_FRACTION", 0.02)
+    urls = [ncar.ncss_url(date(2016, 1, 1 + i % 28), 12 * (i % 2), 6 * (i % 40), T2M, BOX) + f"&n={i}"
+            for i in range(20000)]
+    picked = [u for u in urls if ncar.duplicate_selected(u)]
+    assert 0.017 < len(picked) / len(urls) < 0.023
+    assert picked == [u for u in urls if ncar.duplicate_selected(u)]
+
+
+def _replies(monkeypatch, replies, fraction=1.0):
+    """``get`` stand-in serving ``replies`` in order; records whether each request was made alone."""
+    alone = []
+    real = ncar.download_field
+
+    def dl(*a, **k):
+        alone.append(k.get("alone", False))
+        return real(*a, **k)
+    monkeypatch.setattr(ncar, "download_field", dl)
+    monkeypatch.setattr(ncar, "get", lambda *a, **k: type("R", (), {"content": replies.pop(0)}))
+    monkeypatch.setattr(ncar, "DUPLICATE_FRACTION", fraction)
+    monkeypatch.setattr(ncar, "_MISMATCH_BACKOFF_S", 0.0)
+    monkeypatch.setattr(ncar, "DUPLICATE_STATS", ncar.Counter())
+    return alone
+
+
+def test_a_selected_field_is_fetched_again_alone_and_kept_when_identical(monkeypatch):
+    replies = [_t2m(), _t2m()]
+    alone = _replies(monkeypatch, replies)
+    da = ncar.fetch_field(None, date(2016, 1, 15), 0, 24, T2M, BOX)
+    assert np.array_equal(da.values, T2M_OK) and not replies and alone == [False, True]
+    assert ncar.DUPLICATE_STATS == {"copies": 1, "checked": 1}
+
+
+def test_a_duplicate_mismatch_is_logged_and_copies_are_fetched_until_two_in_a_row_agree(monkeypatch, caplog):
+    other = T2M_OK + np.eye(3, dtype="float32")
+    replies = [_t2m(other), _t2m(), _t2m(other), _t2m(other)]
+    alone = _replies(monkeypatch, replies)
+    da = ncar.fetch_field(None, date(2016, 1, 15), 0, 24, T2M, BOX)
+    assert np.array_equal(da.values, other) and not replies and alone == [False, True, True, True]
+    assert ncar.DUPLICATE_STATS == {"copies": 3, "checked": 1, "mismatched": 1}
+    assert sum("MISMATCH" in r.message for r in caplog.records) == 2
+    assert "3 of 9 values" in caplog.records[0].message
+
+
+def test_copies_that_never_agree_are_a_transient_failure(monkeypatch):
+    replies = [_t2m(T2M_OK + i) for i in range(ncar.DUPLICATE_MAX_COPIES)]
+    _replies(monkeypatch, replies)
+    with pytest.raises(ncar.TransientFetchError, match="no two consecutive copies"):
+        ncar.fetch_field(None, date(2016, 1, 15), 0, 24, T2M, BOX)
+    assert ncar.DUPLICATE_STATS["unresolved"] == 1
+
+
+def test_a_request_made_alone_waits_for_requests_in_flight_and_holds_new_ones_back():
+    import threading
+    order, in_flight, release = [], threading.Event(), threading.Event()
+
+    def shared(tag, hold):
+        with ncar._request_slot(alone=False):
+            order.append(tag)
+            if hold:
+                in_flight.set()
+                release.wait(5)
+
+    def alone():
+        with ncar._request_slot(alone=True):
+            order.append("alone")
+    a = threading.Thread(target=shared, args=("first", True))
+    a.start()
+    in_flight.wait(5)
+    b = threading.Thread(target=alone)
+    b.start()
+    time.sleep(0.2)
+    c = threading.Thread(target=shared, args=("later", False))
+    c.start()
+    time.sleep(0.2)
+    assert order == ["first"]                     # the lone request waits; the later one waits behind it
+    release.set()
+    for t in (a, b, c):
+        t.join(5)
+    assert order == ["first", "alone", "later"]
+
+
+def test_ranges_come_from_each_variables_valid_range_in_the_fields_own_units():
+    from src.data.gfs_fetcher import _NCSS_RANGES
+    from src.data.registry import VARIABLES, part_ranges
+    ws, z, t, fz = (dict((f.ncss.var, r) for f, r in part_ranges(get_variable(k))) for k in ("ws10", "z500", "t2m", "frzl"))
+    assert set(ws.values()) == {(-75.0, 75.0)} and len(ws) == 2
+    assert z == {"Geopotential_height_isobaric": (4400.0, 6200.0)}
+    assert np.allclose(t["Temperature_height_above_ground"], (183.15, 333.15))
+    assert fz["Geopotential_height_surface"] == (-500.0, 9000.0)
+    from src.data.byterange import _parts
+    for spec in VARIABLES.values():
+        g = spec.gfs
+        assert all(f.ncss in _NCSS_RANGES for f in _parts(g.field if hasattr(g, "window_h") else g))
+
+
+def test_an_implausible_field_is_requested_again(monkeypatch):
+    replies = [_t2m(np.full((3, 3), 400.0)), _t2m()]
+    _replies(monkeypatch, replies, fraction=0.0)
+    da = ncar.fetch_field(None, date(2016, 1, 15), 0, 24, T2M, BOX, valid=(183.15, 333.15))
+    assert np.array_equal(da.values, T2M_OK) and not replies
+
+
+def test_a_field_that_stays_implausible_never_reaches_the_raw_file(root, box_cfg, monkeypatch):  # noqa: F811
+    good = _fake_ncss()
+
+    def fake(session, d, r, step, field, bounds, bucket=False, alone=False):
+        if field.ncss.var.startswith("u-") and r == 12 and step == 48:
+            return _ncss(field.ncss.var, np.full((3, 3), 99.9), f"{d} 12:00", step, "m/s",
+                         ("height_above_ground1", 10.0))
+        return good(session, d, r, step, field, bounds, bucket)
+    monkeypatch.setattr(ncar, "download_field", fake)
+    monkeypatch.setattr(ncar, "_MISMATCH_BACKOFF_S", 0.0)
+    monkeypatch.setattr("src.data.byterange.RETRY_PASS_PAUSES_S", ())
+    f = GFSFetcher(box_cfg)
+    path = f.fetch_month("ws10", "europe", 2016, 1, init_dates=[date(2016, 1, 15)])
+    f.validate(path, "ws10", "europe")
+    with xr.open_dataset(path) as ds:
+        assert int(ds.attrs["n_failed"]) == 1 and ds.present.values.sum() == ds.present.size - 1
 
 
 # ---------------------------------------------------------------------------

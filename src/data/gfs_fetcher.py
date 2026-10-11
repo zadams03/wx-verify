@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import date
 from pathlib import Path
 
@@ -10,7 +11,11 @@ import xarray as xr
 from src.data import gfs_ncar_fetcher as ncar
 from src.data.base_fetcher import month_dates
 from src.data.byterange import ByteRangeFetcher, decode_grib, get as _get
-from src.data.registry import AccumulationField, GFSField
+from src.data.registry import VARIABLES, AccumulationField, GFSField, part_ranges
+
+# Plausible range of each NCAR field in its own units, from its variable's valid_range (Phase 12).
+_NCSS_RANGES = {f.ncss: r for spec in VARIABLES.values() if spec.gfs is not None for f, r in part_ranges(spec)}
+logger = logging.getLogger(__name__)
 
 _AWS_BASE = "https://noaa-gfs-bdp-pds.s3.amazonaws.com"
 
@@ -114,9 +119,19 @@ class GFSFetcher(ByteRangeFetcher):
             # The window ending at lead h: the four 6-hour buckets ending at h-18, h-12, h-6 and h.
             f = field.field
             steps = range(h - field.window_h + ncar.BUCKET_H, h + 1, ncar.BUCKET_H)
-            return [(ncar.fetch_field(session, d, r, s, f, bounds, bucket=True), None) for s in steps]
+            return [(ncar.fetch_field(session, d, r, s, f, bounds, bucket=True, valid=_NCSS_RANGES[f.ncss]), None)
+                    for s in steps]
         parts = field.parts if hasattr(field, "parts") else (field,)
-        return [(ncar.fetch_field(session, d, r, h, f, bounds), None) for f in parts]
+        return [(ncar.fetch_field(session, d, r, h, f, bounds, valid=_NCSS_RANGES[f.ncss]), None) for f in parts]
+
+    def fetch_month(self, variable: str, domain: str, year: int, month: int, init_dates=None) -> Path:
+        before = ncar.DUPLICATE_STATS.copy()
+        out = super().fetch_month(variable, domain, year, month, init_dates)
+        got = ncar.DUPLICATE_STATS - before
+        if got["copies"]:
+            logger.info("NCSS duplicate checks %s %s %d-%02d: %d fields checked, %d with a mismatch, %d unresolved",
+                        variable, domain, year, month, got["checked"], got["mismatched"], got["unresolved"])
+        return out
 
     def _decode_bytes(self, content, part, bounds, tmp_dir: Path) -> xr.DataArray:
         if isinstance(content, xr.DataArray):           # NCAR: already decoded and verified

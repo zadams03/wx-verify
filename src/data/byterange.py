@@ -39,7 +39,7 @@ import cfgrib  # noqa: E402
 
 from src.data.accumulation import window_totals
 from src.data.base_fetcher import BaseFetcher
-from src.data.registry import AccumulationField, MaskedLevelField, get_variable
+from src.data.registry import SURFACE_HEIGHT_RANGE, AccumulationField, MaskedLevelField, get_variable
 from src.utils import paths
 
 logger = logging.getLogger(__name__)
@@ -329,8 +329,9 @@ class ByteRangeFetcher(BaseFetcher):
                 raise ValueError(f"{path.name}: NaN inside fields marked present")
             if "surface" in ds:
                 surf = ds.surface.values[present]
-                if np.isnan(surf).any() or surf.min() < -500 or surf.max() > 9000:
-                    raise ValueError(f"{path.name}: surface height missing or outside [-500, 9000] m")
+                slo, shi = SURFACE_HEIGHT_RANGE
+                if np.isnan(surf).any() or surf.min() < slo or surf.max() > shi:
+                    raise ValueError(f"{path.name}: surface height missing or outside [{slo:g}, {shi:g}] m")
             conv = spec.source_field(self.model).conversion.apply(vals)
             lo, hi = spec.valid_range
             if conv.min() < lo or conv.max() > hi:
