@@ -108,18 +108,19 @@ class GFSFetcher(ByteRangeFetcher):
         d, r, h = job
         if self.source_for(d) != "ncar":
             return super()._download_parts(session, job, field, bounds)
+        # NCAR fields are downloaded *and* verified on the worker thread (fetch_field), so a wrong response is
+        # requested again at once; the parts come back decoded.
         if self.windowed(field, d, r):
             # The window ending at lead h: the four 6-hour buckets ending at h-18, h-12, h-6 and h.
             f = field.field
             steps = range(h - field.window_h + ncar.BUCKET_H, h + 1, ncar.BUCKET_H)
-            return [(ncar.download_field(session, d, r, s, f, bounds, bucket=True), (f, s, True)) for s in steps]
+            return [(ncar.fetch_field(session, d, r, s, f, bounds, bucket=True), None) for s in steps]
         parts = field.parts if hasattr(field, "parts") else (field,)
-        return [(ncar.download_field(session, d, r, h, f, bounds), (f, h, False)) for f in parts]
+        return [(ncar.fetch_field(session, d, r, h, f, bounds), None) for f in parts]
 
-    def _decode_bytes(self, content: bytes, part, bounds, tmp_dir: Path) -> xr.DataArray:
-        if isinstance(part, tuple):                     # NCAR: (field, step, bucket), netCDF in memory
-            f, step, bucket = part
-            return ncar.decode_ncss(content, f, bounds, step, bucket)
+    def _decode_bytes(self, content, part, bounds, tmp_dir: Path) -> xr.DataArray:
+        if isinstance(content, xr.DataArray):           # NCAR: already decoded and verified
+            return content
         return super()._decode_bytes(content, part, bounds, tmp_dir)
 
     def _combine_parts(self, job, parts: list[xr.DataArray], field) -> xr.DataArray:

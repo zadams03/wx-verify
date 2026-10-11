@@ -1,7 +1,7 @@
 """Phase 12: GFS long record from NCAR d084001 through THREDDS NCSS (mocked; live checks skip offline)."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 import numpy as np
 import pandas as pd
@@ -25,37 +25,33 @@ APCP = get_variable("tp24").gfs.field
 
 
 def _ncss(var: str, values: np.ndarray, init: str, step: int, units: str, vert: tuple[str, float] | None = None,
-          intervals: list[tuple[int, int]] | None = None, lon0: float = 359.75) -> bytes:
+          intervals: list[tuple[int, int]] | None = None, lon0: float = 359.75, ref: str | None = None) -> bytes:
     """netCDF-3 bytes laid out like an NCSS response: longitudes continuing past 360, latitude descending,
-    reftime, a time axis (with bounds for accumulations) and an optional one-level vertical axis."""
-    ref = pd.Timestamp(init)
+    times as 'Hour since <run>Z' (reftime, a time axis with bounds for accumulations) and an optional
+    one-level vertical axis. ``ref`` makes the response claim another run."""
+    tu = f"Hour since {pd.Timestamp(ref or init):%Y-%m-%dT%H:%M:%S}Z"
     lat = np.array([50.5, 50.25, 50.0], "float32")
     lon = (lon0 + 0.25 * np.arange(3)).astype("float32")
-    coords = {"latitude": lat, "longitude": lon, "reftime": ref}
+    coords = {"latitude": lat, "longitude": lon, "reftime": ((), 0.0, {"units": tu})}
     data = np.asarray(values, "float32")
     dims = ["latitude", "longitude"]
     extra = {}
     if intervals is None:
-        coords["time1"] = [ref + pd.Timedelta(hours=step)]
+        coords["time1"] = ("time1", [float(step)], {"units": tu})
         data, dims = data[None], ["time1"] + dims
     else:
-        coords["time"] = [ref + pd.Timedelta(hours=(a + b) / 2) for a, b in intervals]
-        extra["time_bounds"] = (("time", "bounds_dim"),
-                                np.array([[ref + pd.Timedelta(hours=a), ref + pd.Timedelta(hours=b)]
-                                          for a, b in intervals], "datetime64[ns]"))
+        coords["time"] = ("time", [(a + b) / 2 for a, b in intervals], {"units": tu, "bounds": "time_bounds"})
+        extra["time_bounds"] = (("time", "bounds_dim"), np.array(intervals, "float64"), {"units": tu})
         data, dims = np.stack([data] * len(intervals)), ["time"] + dims
     if vert is not None:
         coords[vert[0]] = [vert[1]]
         data, dims = data[:, None], [dims[0], vert[0]] + dims[1:]
     ds = xr.Dataset({var: (dims, data, {"units": units}), **extra}, coords=coords)
-    if intervals is not None:
-        ds["time"].attrs["bounds"] = "time_bounds"
-    enc = {c: {"units": "hours since 1970-01-01", "dtype": "float64"}
-           for c in ("reftime", "time", "time1", "time_bounds") if c in ds.variables}
-    return bytes(ds.to_netcdf(engine="scipy", encoding=enc))
+    return bytes(ds.to_netcdf(engine="scipy"))
 
 
 GRID = np.arange(9, dtype="float32").reshape(3, 3)
+INIT16, INIT20 = datetime(2016, 1, 15), datetime(2020, 6, 15)
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +82,7 @@ def test_every_gfs_field_has_an_ncar_name():
 
 def test_decode_puts_the_field_on_the_domain_grid():
     da = ncar.decode_ncss(_ncss(T2M.ncss.var, GRID, "2016-01-15", 24, "K", ("height_above_ground1", 2.0)),
-                          T2M, BOX, 24)
+                          T2M, BOX, INIT16, 24)
     assert da.latitude.values.tolist() == [50.5, 50.25, 50.0] and da.longitude.values.tolist() == [-0.25, 0.0, 0.25]
     assert np.array_equal(da.values, GRID) and da.dtype == np.float32
 
@@ -96,28 +92,49 @@ def test_decode_puts_the_field_on_the_domain_grid():
     (dict(vert=("height_above_ground1", 80.0)), "level"),
     (dict(step=21), "valid times"),
     (dict(lon0=0.0), "grid"),
+    (dict(ref="2016-01-16"), "not 2016-01-15 00z"),
+    (dict(var="v-component_of_wind_height_above_ground"), "not Temperature"),
 ])
 def test_decode_refuses_a_response_that_is_not_the_field_asked_for(kw, match):
-    args = dict(units="K", vert=("height_above_ground1", 2.0), step=24) | kw
-    content = _ncss(T2M.ncss.var, GRID, "2016-01-15", args["step"], args["units"], args["vert"],
-                    lon0=kw.get("lon0", 359.75))
-    with pytest.raises(ValueError, match=match):
-        ncar.decode_ncss(content, T2M, BOX, 24)
+    args = dict(var=T2M.ncss.var, units="K", vert=("height_above_ground1", 2.0), step=24, lon0=359.75, ref=None) | kw
+    content = _ncss(args["var"], GRID, "2016-01-15", args["step"], args["units"], args["vert"],
+                    lon0=args["lon0"], ref=args["ref"])
+    with pytest.raises(ncar.ResponseMismatch, match=match):
+        ncar.decode_ncss(content, T2M, BOX, INIT16, 24)
+
+
+def test_a_wrong_response_is_requested_again(monkeypatch):
+    replies = [_ncss(T2M.ncss.var, GRID, "2016-01-15", 24, "K", ("height_above_ground1", 2.0), ref="2021-06-12T12"),
+               b"<html>busy</html>",
+               _ncss(T2M.ncss.var, GRID, "2016-01-15", 24, "K", ("height_above_ground1", 2.0))]
+    monkeypatch.setattr(ncar, "get", lambda *a, **k: type("R", (), {"content": replies.pop(0)}))
+    monkeypatch.setattr(ncar, "_MISMATCH_BACKOFF_S", 0.0)
+    da = ncar.fetch_field(None, date(2016, 1, 15), 0, 24, T2M, BOX)
+    assert np.array_equal(da.values, GRID) and not replies
+
+
+def test_a_field_that_keeps_coming_back_wrong_is_a_transient_failure(monkeypatch):
+    wrong = _ncss(T2M.ncss.var, GRID, "2016-01-15", 24, "K", ("height_above_ground1", 2.0), ref="2016-01-14")
+    monkeypatch.setattr(ncar, "get", lambda *a, **k: type("R", (), {"content": wrong}))
+    monkeypatch.setattr(ncar, "_MISMATCH_BACKOFF_S", 0.0)
+    with pytest.raises(ncar.TransientFetchError, match="wrong responses"):
+        ncar.fetch_field(None, date(2016, 1, 15), 0, 24, T2M, BOX)
 
 
 def test_continuous_precipitation_is_the_interval_from_initialisation():
     content = _ncss(APCP.ncss.var, GRID, "2020-06-15", 96, "kg.m-2", intervals=[(0, 96), (90, 96)])
-    assert np.array_equal(ncar.decode_ncss(content, APCP, BOX, 96).values, GRID)
-    with pytest.raises(ValueError, match="need exactly one"):
-        ncar.decode_ncss(_ncss(APCP.ncss.var, GRID, "2020-06-15", 96, "kg.m-2", intervals=[(90, 96)]), APCP, BOX, 96)
+    assert np.array_equal(ncar.decode_ncss(content, APCP, BOX, INIT20, 96).values, GRID)
+    with pytest.raises(ncar.ResponseMismatch, match="need exactly one"):
+        ncar.decode_ncss(_ncss(APCP.ncss.var, GRID, "2020-06-15", 96, "kg.m-2", intervals=[(90, 96)]),
+                         APCP, BOX, INIT20, 96)
 
 
 def test_a_bucket_must_be_the_six_hours_ending_at_its_step():
     ok = _ncss(APCP.ncss.bucket_var, GRID, "2016-01-15", 24, "kg.m-2", intervals=[(18, 24)])
-    assert np.array_equal(ncar.decode_ncss(ok, APCP, BOX, 24, bucket=True).values, GRID)
+    assert np.array_equal(ncar.decode_ncss(ok, APCP, BOX, INIT16, 24, bucket=True).values, GRID)
     bad = _ncss(APCP.ncss.bucket_var, GRID, "2016-01-15", 24, "kg.m-2", intervals=[(12, 24)])
-    with pytest.raises(ValueError, match="need exactly one"):
-        ncar.decode_ncss(bad, APCP, BOX, 24, bucket=True)
+    with pytest.raises(ncar.ResponseMismatch, match="need exactly one"):
+        ncar.decode_ncss(bad, APCP, BOX, INIT16, 24, bucket=True)
 
 
 # ---------------------------------------------------------------------------
@@ -252,7 +269,7 @@ def test_live_decode_of_every_variable(key):
         lo = -hi                                   # the components, not the speed
     for f in _parts(gfs.field if hasattr(gfs, "window_h") else gfs):
         for d, bucket in ((date(2016, 1, 15), key == "tp24"), (date(2020, 6, 15), False)):
-            da = ncar.decode_ncss(ncar.download_field(s, d, 0, 24, f, b, bucket), f, b, 24, bucket)
+            da = ncar.fetch_field(s, d, 0, 24, f, b, bucket)
             assert da.shape == (105, 153)
             v = f.conversion.apply(da.values[np.isfinite(da.values)].astype("float64"))
             assert v.size and lo <= v.min() and v.max() <= hi, (key, f.idx_name, d)

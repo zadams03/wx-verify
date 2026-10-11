@@ -12,13 +12,15 @@ ending at the file's step exists, so a 24-hour window is the sum of four buckets
 from __future__ import annotations
 
 import io
+import re
+import time
 from datetime import date, datetime
 
 import numpy as np
 import requests
 import xarray as xr
 
-from src.data.byterange import TransientFetchError, get  # noqa: F401  (raised by get)
+from src.data.byterange import TransientFetchError, get
 from src.data.registry import GFSField
 
 _NCSS_BASE = "https://tds.gdex.ucar.edu/thredds/ncss/grid/files/g/d084001"
@@ -49,14 +51,42 @@ def ncss_url(init_date: date, run_hour: int, step_h: int, field: GFSField, bound
     return url
 
 
+class ResponseMismatch(TransientFetchError):
+    """An NCSS response that is not the field asked for (another run, variable, step or level).
+
+    Seen under concurrent load: the server occasionally answers a request with another request's data.
+    Treated as transient — the field is requested again."""
+
+
+MISMATCH_ATTEMPTS = 5
+_MISMATCH_BACKOFF_S = 5.0
+
+
 def download_field(session: requests.Session, init_date: date, run_hour: int, step_h: int, field: GFSField,
                    bounds, bucket: bool = False) -> bytes:
     """netCDF bytes of one field. 404s and timeouts are retried like any failed request (``get``): the
     server has returned a passing 404 for a file it lists."""
     content = get(session, ncss_url(init_date, run_hour, step_h, field, bounds, bucket), timeout=300).content
     if content[:3] != b"CDF":
-        raise ValueError(f"NCSS returned no netCDF for {init_date} {run_hour:02d}z +{step_h}h: {content[:120]!r}")
+        raise ResponseMismatch(f"NCSS returned no netCDF for {init_date} {run_hour:02d}z +{step_h}h: {content[:120]!r}")
     return content
+
+
+def fetch_field(session: requests.Session, init_date: date, run_hour: int, step_h: int, field: GFSField,
+                bounds, bucket: bool = False) -> xr.DataArray:
+    """Download and verify one field (``decode_ncss``), requesting it again when the response is not the
+    field asked for. Raises ResponseMismatch (transient) if every attempt is wrong. Thread-safe: netCDF-3
+    is read by scipy, in pure Python."""
+    init = datetime(init_date.year, init_date.month, init_date.day, run_hour)
+    last: Exception | None = None
+    for attempt in range(MISMATCH_ATTEMPTS):
+        try:
+            return decode_ncss(download_field(session, init_date, run_hour, step_h, field, bounds, bucket),
+                               field, bounds, init, step_h, bucket)
+        except ResponseMismatch as exc:
+            last = exc
+            time.sleep(_MISMATCH_BACKOFF_S * (attempt + 1))
+    raise ResponseMismatch(f"{MISMATCH_ATTEMPTS} wrong responses for {init:%Y-%m-%d %H}z +{step_h}h: {last}")
 
 
 def _grid(bounds) -> tuple[np.ndarray, np.ndarray]:
@@ -66,50 +96,69 @@ def _grid(bounds) -> tuple[np.ndarray, np.ndarray]:
     return lat, lon
 
 
-def _hours(ds: xr.Dataset, t) -> float:
-    return float((np.datetime64(t) - ds["reftime"].values) / np.timedelta64(1, "h"))
+def _times(ds: xr.Dataset, name: str) -> np.ndarray:
+    """A time variable as datetime64, from its own 'Hour since …' units (read undecoded, so an unexpected
+    unit string is an error rather than a guess)."""
+    m = re.fullmatch(r"[Hh]ours? since (\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})Z?", ds[name].attrs.get("units", ""))
+    if m is None:
+        raise ResponseMismatch(f"{name}: time units {ds[name].attrs.get('units')!r}")
+    origin = np.datetime64(f"{m[1]}T{m[2]}")
+    return origin + (np.asarray(ds[name].values, "float64") * 3600).astype("timedelta64[s]")
 
 
-def decode_ncss(content: bytes, field: GFSField, bounds, step_h: int, bucket: bool = False) -> xr.DataArray:
+def decode_ncss(content: bytes, field: GFSField, bounds, init: datetime, step_h: int,
+                bucket: bool = False) -> xr.DataArray:
     """One NCSS response → DataArray(latitude, longitude) float32 on the domain grid, in GRIB units.
 
-    Checked: the variable's units, the level (when one was asked for), the valid time (``step_h`` after
-    the run's reference time) and, for precipitation, the accumulation interval — the 6-hour bucket
-    ending at the step, or the one from initialisation to the step — and the grid itself.
+    Everything is checked against the request, and a response that fails is a ResponseMismatch: the
+    reference time is the run asked for, the variable, its units and level (when one was asked for) are
+    the field's, the valid time is ``step_h`` later — for precipitation the accumulation interval is the
+    6-hour bucket ending at the step, or the one from initialisation to it — and the grid is the domain's.
     """
     n = field.ncss
     var = n.bucket_var if bucket else n.var
-    with xr.open_dataset(io.BytesIO(content), engine="scipy", mmap=False) as ds:
-        ds = ds.load()
-    if var not in ds:
-        raise ValueError(f"NCSS response lacks {var}: {list(ds.data_vars)}")
+    try:
+        with xr.open_dataset(io.BytesIO(content), engine="scipy", mmap=False, decode_times=False) as ds:
+            ds = ds.load()
+    except Exception as exc:
+        raise ResponseMismatch(f"undecodable NCSS response: {exc}") from exc
+    ref = _times(ds, "reftime").ravel()
+    if ref.size != 1 or ref[0] != np.datetime64(init, "s"):
+        raise ResponseMismatch(f"response is for run {ref}, not {init:%Y-%m-%d %H}z")
+    if var not in ds or [v for v in ds.data_vars if not v.startswith(("LatLon", "time"))] != [var]:
+        raise ResponseMismatch(f"response holds {list(ds.data_vars)}, not {var}")
     da = ds[var]
     if da.attrs.get("units") != n.units:
-        raise ValueError(f"{var}: units {da.attrs.get('units')!r}, expected {n.units!r}")
+        raise ResponseMismatch(f"{var}: units {da.attrs.get('units')!r}, expected {n.units!r}")
     tdim = next(d for d in da.dims if d.startswith("time"))
+    hours = lambda t: float((t - ref[0]) / np.timedelta64(1, "h"))      # noqa: E731
     if n.bucket_var is not None:
-        bname = ds[tdim].attrs.get("bounds") or ds[tdim].encoding.get("bounds") or f"{tdim}_bounds"
-        spans = [(_hours(ds, a), _hours(ds, b)) for a, b in ds[bname].values]
+        bname = ds[tdim].attrs.get("bounds") or f"{tdim}_bounds"
+        b = _times(ds, bname) if "units" in ds[bname].attrs else _times(ds.assign(
+            {bname: ds[bname].assign_attrs(units=ds[tdim].attrs.get("units"))}), bname)
+        spans = [(hours(a), hours(c)) for a, c in b.reshape(-1, 2)]
         want = (step_h - BUCKET_H, step_h) if bucket else (0.0, step_h)
-        hit = [i for i, s in enumerate(spans) if s == want]
+        hit = [i for i, sp in enumerate(spans) if sp == want]
         if len(hit) != 1:
-            raise ValueError(f"{var} +{step_h}h: intervals {spans}, need exactly one {want}")
+            raise ResponseMismatch(f"{var} +{step_h}h: intervals {spans}, need exactly one {want}")
         da = da.isel({tdim: hit[0]})
     else:
-        if da.sizes[tdim] != 1 or _hours(ds, da[tdim].values[0]) != step_h:
-            raise ValueError(f"{var}: valid times {da[tdim].values} are not {step_h}h after the run")
+        t = _times(ds, tdim)
+        if t.size != 1 or hours(t[0]) != step_h:
+            raise ResponseMismatch(f"{var}: valid times {t} are not {step_h}h after the run")
         da = da.isel({tdim: 0})
     vdims = [d for d in da.dims if d not in ("latitude", "longitude")]
     if n.vert is not None:
         if len(vdims) != 1 or da.sizes[vdims[0]] != 1 or float(da[vdims[0]].values[0]) != n.vert:
-            raise ValueError(f"{var}: level {[da[d].values for d in vdims]}, expected {n.vert:g}")
+            raise ResponseMismatch(f"{var}: level {[da[d].values for d in vdims]}, expected {n.vert:g}")
         da = da.isel({vdims[0]: 0})
     elif vdims:
-        raise ValueError(f"{var}: unexpected extra dimensions {vdims}")
+        raise ResponseMismatch(f"{var}: unexpected extra dimensions {vdims}")
     lat, lon = _grid(bounds)
     got_lat = da.latitude.values.astype("float64")
     got_lon = (da.longitude.values.astype("float64") + 180) % 360 - 180
-    if not (np.allclose(got_lat, lat, atol=1e-4) and np.allclose(got_lon, lon, atol=1e-4)):
-        raise ValueError(f"{var}: grid {got_lat[[0, -1]]}/{got_lon[[0, -1]]} is not the domain grid")
+    if got_lat.shape != lat.shape or got_lon.shape != lon.shape or not (
+            np.allclose(got_lat, lat, atol=1e-4) and np.allclose(got_lon, lon, atol=1e-4)):
+        raise ResponseMismatch(f"{var}: grid {got_lat[[0, -1]]}/{got_lon[[0, -1]]} is not the domain grid")
     return xr.DataArray(da.values.astype("float32"), dims=("latitude", "longitude"),
                         coords={"latitude": lat, "longitude": lon})
