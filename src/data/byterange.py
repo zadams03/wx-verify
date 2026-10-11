@@ -329,7 +329,7 @@ class ByteRangeFetcher(BaseFetcher):
         da = field.conversion.apply(ds["data"].astype("float64")).astype("float32")
         da = da.assign_coords(present=(("init_time", "lead_time"), ds["present"].values.astype(bool)))
         if isinstance(field, AccumulationField):
-            da, _ = window_totals(da, list(self.config.lead_times_hours), field.window_h)
+            da = window_totals(da, list(self.config.lead_times_hours), field.window_h)
         if "surface" in ds:
             da = da.assign_coords(surface_height=ds["surface"].astype("float32"))
         da.attrs.update(source=self.label, variable=variable)

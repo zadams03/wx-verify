@@ -15,12 +15,12 @@ import xarray as xr
 NEGATIVE_TOLERANCE_MM = 1.0
 
 
-def window_totals(acc: xr.DataArray, leads: list[int], window_h: int) -> tuple[xr.DataArray, xr.DataArray]:
+def window_totals(acc: xr.DataArray, leads: list[int], window_h: int) -> xr.DataArray:
     """Window totals ending at each lead from accumulations at the raw file's steps.
 
     ``acc`` has dims (init_time, lead_time, lat, lon) with lead_time = the steps fetched and a boolean
-    ``present`` (init_time, lead_time) coord. Returns (totals, n_clipped): totals have lead_time = ``leads``
-    and ``present`` true only where both accumulations are present; n_clipped (init_time, lead_time) counts
+    ``present`` (init_time, lead_time) coord. Returns the totals with lead_time = ``leads``, a ``present`` coord true
+    only where both accumulations are present, and an ``n_clipped`` (init_time, lead_time) coord counting
     the grid points whose difference was slightly negative (packing noise: the two accumulations are packed
     separately) and was set to 0. Totals are NaN where either accumulation is missing.
     """
@@ -55,7 +55,7 @@ def window_totals(acc: xr.DataArray, leads: list[int], window_h: int) -> tuple[x
     totals = totals.assign_coords(present=(("init_time", "lead_time"), ok),
                                   n_clipped=(("init_time", "lead_time"), clipped))
     totals.attrs.update(acc.attrs)
-    return totals, totals["n_clipped"]
+    return totals
 
 
 def hourly_window_sums(hourly: xr.DataArray, end_hours: list[int], window_h: int) -> xr.DataArray:

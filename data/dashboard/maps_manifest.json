@@ -1,559 +1,751 @@
 {
- "release_tag": "maps-20261010",
+ "release_tag": "maps-20261011",
  "repo": "zadams03/wx-verify",
- "total_bytes": 143522010,
+ "total_bytes": 187071464,
  "files": [
   {
    "path": "compare/gfs_vs_ecmwf/gfs/msl/europe/2024.nc",
    "asset": "compare__gfs_vs_ecmwf__gfs__msl__europe__2024.nc",
-   "bytes": 2013159,
-   "sha256": "4bc1affee13dc3c976a9df90c4bb521416497ea971ecee6c75688fa88b70be3a"
+   "bytes": 2010760,
+   "sha256": "2059eecef00556bb5f18e56486d599660e673e4e6c997b10a1ce6524184de773"
   },
   {
    "path": "compare/gfs_vs_ecmwf/gfs/msl/north_america_west/2024.nc",
    "asset": "compare__gfs_vs_ecmwf__gfs__msl__north_america_west__2024.nc",
-   "bytes": 1197838,
-   "sha256": "9d38dad438a85260e4f3d5727b5c3b684c4d22dfd02d825a508f462f66cbade7"
+   "bytes": 1196175,
+   "sha256": "677a905252b7ddb1cf3111b5cfc24ad4f524b1aeeda0d2f80344414f4d30a709"
   },
   {
    "path": "compare/gfs_vs_ecmwf/gfs/t2m/europe/2024.nc",
    "asset": "compare__gfs_vs_ecmwf__gfs__t2m__europe__2024.nc",
-   "bytes": 2318840,
-   "sha256": "ca2ece139bee4c176e53ef12537a9909a3daf9295259c3cafafcc2332e54e12d"
+   "bytes": 2318126,
+   "sha256": "119623b38028e6eddff1568a1426c8149a2bf7e9e1978a094d0b156c9ba0d6d5"
   },
   {
    "path": "compare/gfs_vs_ecmwf/gfs/t2m/north_america_west/2024.nc",
    "asset": "compare__gfs_vs_ecmwf__gfs__t2m__north_america_west__2024.nc",
-   "bytes": 1279096,
-   "sha256": "7088b71933510defe548fa1127f90fd660f15d97e6fb3169c8bdcc98c217ea44"
+   "bytes": 1277433,
+   "sha256": "8e9f839bf7f44cba75faaba37fe9b37991fcf30cbcbd522191a3eb566c838afb"
+  },
+  {
+   "path": "compare/gfs_vs_ecmwf/gfs/tp24/europe/2024.nc",
+   "asset": "compare__gfs_vs_ecmwf__gfs__tp24__europe__2024.nc",
+   "bytes": 2408778,
+   "sha256": "6e17f76f277b70327977f1bcd296448bb476b4d1ea136ae0c4a1e53ecca45f58"
+  },
+  {
+   "path": "compare/gfs_vs_ecmwf/gfs/tp24/north_america_west/2024.nc",
+   "asset": "compare__gfs_vs_ecmwf__gfs__tp24__north_america_west__2024.nc",
+   "bytes": 1347688,
+   "sha256": "ca7606ebba83b1963815662b6edc029da5ae60ea64522840053e3c10b0b89f25"
   },
   {
    "path": "compare/gfs_vs_ecmwf/gfs/ws10/europe/2024.nc",
    "asset": "compare__gfs_vs_ecmwf__gfs__ws10__europe__2024.nc",
-   "bytes": 2321088,
-   "sha256": "ffe60bed5cf539e578c68cc8c03645d2a4dcf1b1d47e7ff2e021107142c4ab93"
+   "bytes": 2321559,
+   "sha256": "1da38d1954fe6f3f54ff3a65feff66734aa465c5888c8c6d8c4d64d3fdeaad57"
   },
   {
    "path": "compare/gfs_vs_ecmwf/gfs/ws10/north_america_west/2024.nc",
    "asset": "compare__gfs_vs_ecmwf__gfs__ws10__north_america_west__2024.nc",
-   "bytes": 1279188,
-   "sha256": "fddc569c01b777b888700d48458cb277ef5652d65e569b5d2aa7e7e1ba49ce8c"
+   "bytes": 1280043,
+   "sha256": "c31c571d27af568842639217ba0652ed6016f3a92ef7a5c8170055f19eecef12"
   },
   {
    "path": "compare/gfs_vs_ecmwf/gfs/z500/europe/2024.nc",
    "asset": "compare__gfs_vs_ecmwf__gfs__z500__europe__2024.nc",
-   "bytes": 1905841,
-   "sha256": "5e65265c366e1484fe8488345bd93cdbb834269296d043d21a61961d3d8cf923"
+   "bytes": 1906087,
+   "sha256": "463d49216f2c9005c532e561731757f0634ca97293440aca8d661e78b5da1d7c"
   },
   {
    "path": "compare/gfs_vs_ecmwf/gfs/z500/north_america_west/2024.nc",
    "asset": "compare__gfs_vs_ecmwf__gfs__z500__north_america_west__2024.nc",
-   "bytes": 1077529,
-   "sha256": "67e36d38300fb8d9de0ce8510baaef0ca2e0fb034d787c8bc441ea0edfdb9ffc"
+   "bytes": 1078159,
+   "sha256": "88a664772cc881acfde7f2c38ef57b83c30b03947de70c3119fc38512026dfa8"
   },
   {
    "path": "ecmwf/msl/europe/2024.nc",
    "asset": "ecmwf__msl__europe__2024.nc",
-   "bytes": 2015398,
-   "sha256": "f5369329829c486f43a88123830c794824eeba70d4029ed26a7b389b31e0fc5d"
+   "bytes": 2013618,
+   "sha256": "f279ee50ddeaa91cb631522227a8bfd3745fc70a29eeebe6cc0b4452f89e2841"
   },
   {
    "path": "ecmwf/msl/europe/2025.nc",
    "asset": "ecmwf__msl__europe__2025.nc",
-   "bytes": 2030238,
-   "sha256": "5f1e32c5a346b9025dd4fc7030c8115dd99f7ce01a87da44a3ece36123e40c95"
+   "bytes": 2028458,
+   "sha256": "c8700f9f09862c7efbd9aaeaebc7f165c08ab8bb41f623c23020c3c00948574a"
   },
   {
    "path": "ecmwf/msl/europe/2026.nc",
    "asset": "ecmwf__msl__europe__2026.nc",
-   "bytes": 2021045,
-   "sha256": "67a2aab1ce7bcc8cf7578e9cb2e68c22e480794333eaa241e0954f7ec8ed1814"
+   "bytes": 2019265,
+   "sha256": "8139ab36c29fe74cd100d45e851268f1482bbf34b5b5d0cad03d763422a3f04a"
   },
   {
    "path": "ecmwf/msl/north_america_west/2024.nc",
    "asset": "ecmwf__msl__north_america_west__2024.nc",
-   "bytes": 1191386,
-   "sha256": "61b15481499df4dafd9e77638b9eae2864674dd78b7603d18d1213c0425e1ce6"
+   "bytes": 1189990,
+   "sha256": "e015a93d5504d309c33e779323b35a9de0465af69815b90b75f6c3f337f2e684"
   },
   {
    "path": "ecmwf/msl/north_america_west/2025.nc",
    "asset": "ecmwf__msl__north_america_west__2025.nc",
-   "bytes": 1191082,
-   "sha256": "79a7df2ad969c1a047c23ca40d2e0e86a63845afaa14979f92f337541500c3d5"
+   "bytes": 1189686,
+   "sha256": "f8008ede6effc519f9cef8725dfec6d69f846c91f157cf2e0f414b0be6c1676e"
   },
   {
    "path": "ecmwf/msl/north_america_west/2026.nc",
    "asset": "ecmwf__msl__north_america_west__2026.nc",
-   "bytes": 1191231,
-   "sha256": "991079f8bc32ddd402070c8180f5c1fca9d19562e7147825be7df3488a1ee03b"
+   "bytes": 1189835,
+   "sha256": "f0a7ae8213b97681ebd8dd5233c6e483a26e3647391ee275197e000e94f811a8"
   },
   {
    "path": "ecmwf/t2m/europe/2024.nc",
    "asset": "ecmwf__t2m__europe__2024.nc",
-   "bytes": 2299702,
-   "sha256": "0438b675e93af9abff698d354731ce493b2eba0923aa5862ce1d87d1e16ef9e3"
+   "bytes": 2297922,
+   "sha256": "60be986c86783ea5911a846cabd176ee33245226fb52b3e989fea79f5ba2034e"
   },
   {
    "path": "ecmwf/t2m/europe/2025.nc",
    "asset": "ecmwf__t2m__europe__2025.nc",
-   "bytes": 2291814,
-   "sha256": "6932750ea09b5cbf5550ef7534092b142401d08e4a40e66e012ac67ea3ddd564"
+   "bytes": 2290034,
+   "sha256": "ede71b353679f347953a393bd17a9b4933f97d3a7dace8f47e77a11fde46843a"
   },
   {
    "path": "ecmwf/t2m/europe/2026.nc",
    "asset": "ecmwf__t2m__europe__2026.nc",
-   "bytes": 2322131,
-   "sha256": "78fbb05a27b2f99b2c74ceaa10b61b2149a9fbdf2cee44d2aff39df175ecf1e3"
+   "bytes": 2320351,
+   "sha256": "eb125de4640601397d5f05d9ec82f731b3a81bec90f0a0228c9768d4d2bf1797"
   },
   {
    "path": "ecmwf/t2m/north_america_west/2024.nc",
    "asset": "ecmwf__t2m__north_america_west__2024.nc",
-   "bytes": 1268468,
-   "sha256": "f7bea078f098afece24b5c6b6e5255316ca95fbdafe9d8e14256b7d24db14e80"
+   "bytes": 1267072,
+   "sha256": "ca181369b4d0669e370233a07172085d163d1dc695597ac36e37d3aec1da5972"
   },
   {
    "path": "ecmwf/t2m/north_america_west/2025.nc",
    "asset": "ecmwf__t2m__north_america_west__2025.nc",
-   "bytes": 1270363,
-   "sha256": "11976e5db1960c4aa7521a788ef6274e9d55e50e287f1bc57ad4be24d71f33f1"
+   "bytes": 1268967,
+   "sha256": "ce86a35b4dd84029db66dfa2f1a7b738afedd3a1e98c917d6d0b2fbcd3e894c5"
   },
   {
    "path": "ecmwf/t2m/north_america_west/2026.nc",
    "asset": "ecmwf__t2m__north_america_west__2026.nc",
-   "bytes": 1271985,
-   "sha256": "38fde0e7fb9a5c31830075b903191832f5d7c1dedf1273d05f4b3b11bb498e6d"
+   "bytes": 1270589,
+   "sha256": "5a767f408ed2e3db2970dd80734d522e8d666ded0461c85bbc939d6e8b36e9e3"
+  },
+  {
+   "path": "ecmwf/tp24/europe/2024.nc",
+   "asset": "ecmwf__tp24__europe__2024.nc",
+   "bytes": 2436556,
+   "sha256": "7e40010ea50e9b1b775b9cf88bee494f7add7aeaf4d82228f4511363eb1ede96"
+  },
+  {
+   "path": "ecmwf/tp24/europe/2025.nc",
+   "asset": "ecmwf__tp24__europe__2025.nc",
+   "bytes": 2443983,
+   "sha256": "3eaf9825c282a7ea28e2aeb89ad7e345919f5b01083de9a37282035ea469c395"
+  },
+  {
+   "path": "ecmwf/tp24/europe/2026.nc",
+   "asset": "ecmwf__tp24__europe__2026.nc",
+   "bytes": 2331791,
+   "sha256": "c79065b6738ae4489172dc325ebcd5bf3bc74a530f89b31a5e6c444c081328a9"
+  },
+  {
+   "path": "ecmwf/tp24/north_america_west/2024.nc",
+   "asset": "ecmwf__tp24__north_america_west__2024.nc",
+   "bytes": 1351608,
+   "sha256": "dcae10cb4d44c5e8789b4802b964ba3d098c7043419b3f6f83adc0f45e271d06"
+  },
+  {
+   "path": "ecmwf/tp24/north_america_west/2025.nc",
+   "asset": "ecmwf__tp24__north_america_west__2025.nc",
+   "bytes": 1367941,
+   "sha256": "76ffc592e42715305c1ad53cb2384508add2cc60ffe52d2b150f8c208afa164e"
+  },
+  {
+   "path": "ecmwf/tp24/north_america_west/2026.nc",
+   "asset": "ecmwf__tp24__north_america_west__2026.nc",
+   "bytes": 1300980,
+   "sha256": "720bb65a3e812df20f7a5ac6b1eef8deebdde247dff5aa552d27bae95935743d"
   },
   {
    "path": "ecmwf/ws10/europe/2024.nc",
    "asset": "ecmwf__ws10__europe__2024.nc",
-   "bytes": 2332532,
-   "sha256": "2a327cc596aeb5da3073517d3644a6c89ab7ce74d1c3111d03a257b522d6c6b4"
+   "bytes": 2333049,
+   "sha256": "2d71f6b54942193b2ca7850f5dc7ebd665300757bdb010767d3929980a49e2bf"
   },
   {
    "path": "ecmwf/ws10/europe/2025.nc",
    "asset": "ecmwf__ws10__europe__2025.nc",
-   "bytes": 2330245,
-   "sha256": "e7ff73efc8caedefdfe63a7160106a827e90ee13fbe3460f76a573e53e806cff"
+   "bytes": 2330762,
+   "sha256": "d2fe9168a4788eb437f06dde9e7127b0305e7605539ad3abd7759ab8e811b8a6"
   },
   {
    "path": "ecmwf/ws10/europe/2026.nc",
    "asset": "ecmwf__ws10__europe__2026.nc",
-   "bytes": 2336479,
-   "sha256": "c626c798356a124069c645915c0b4b12f90672d236f1fffc41e950434f989889"
+   "bytes": 2336996,
+   "sha256": "be978b004b84a33b2abf2b1f6cd9bc2998a4e38358d85283775c1aa5ea618812"
   },
   {
    "path": "ecmwf/ws10/north_america_west/2024.nc",
    "asset": "ecmwf__ws10__north_america_west__2024.nc",
-   "bytes": 1287612,
-   "sha256": "daa7b188132f921f47aa29f5bfa84ed4b8e45236bd15a83a42739a57eda9c458"
+   "bytes": 1288865,
+   "sha256": "390054da89c250ace6114393031ff16c6c70735a9dee36d4e60b6b046fdf4012"
   },
   {
    "path": "ecmwf/ws10/north_america_west/2025.nc",
    "asset": "ecmwf__ws10__north_america_west__2025.nc",
-   "bytes": 1285344,
-   "sha256": "f987935f1452fd80e5abf5fafa7cc24e11dcac95f9c5558991ea17bae7db5f54"
+   "bytes": 1286597,
+   "sha256": "f1bcc7e53b825bbe27518483335ca8791b57de5a6ce2d213a23ae18c761d37dd"
   },
   {
    "path": "ecmwf/ws10/north_america_west/2026.nc",
    "asset": "ecmwf__ws10__north_america_west__2026.nc",
-   "bytes": 1291548,
-   "sha256": "1b1102f550e8bd1cd0b2f3701449d99ffd9cb31b3013baf62d696bb419846d40"
+   "bytes": 1292801,
+   "sha256": "a69d3177953ae39a36b1899ddfb63418bc022eceb81c6a85b53952eb3d625c80"
   },
   {
    "path": "ecmwf/z500/europe/2024.nc",
    "asset": "ecmwf__z500__europe__2024.nc",
-   "bytes": 1895908,
-   "sha256": "39d60a2190dfd68e799257fd74740adb1b0b5754fed03251741406be08297e50"
+   "bytes": 1897202,
+   "sha256": "c0d3b6d409e6595067a2dccebe7df894cb34b4e254d2b2fd78fd1359c569d92c"
   },
   {
    "path": "ecmwf/z500/europe/2025.nc",
    "asset": "ecmwf__z500__europe__2025.nc",
-   "bytes": 1889734,
-   "sha256": "a4a372ee819c69d35edcccca1bd39439f4baf33c0202fd6901d7d752a7529933"
+   "bytes": 1891028,
+   "sha256": "ba98fbd3e17ae4a92bbda94fc2f04bdb999668baef68727e7680ca442b6d9dc3"
   },
   {
    "path": "ecmwf/z500/europe/2026.nc",
    "asset": "ecmwf__z500__europe__2026.nc",
-   "bytes": 1892740,
-   "sha256": "aca4ee9993b4500ed63d7f9735acd82960b23c610af79bb685ae38f35fd653f3"
+   "bytes": 1894034,
+   "sha256": "f3f00b6d63694d242a567dc1f1e9e5a45a7b9745f2f880aae2faa839dba2adc6"
   },
   {
    "path": "ecmwf/z500/north_america_west/2024.nc",
    "asset": "ecmwf__z500__north_america_west__2024.nc",
-   "bytes": 1071234,
-   "sha256": "abde6a55427b4710a3624d4c9e4ea0d969b87584914ab3635098635593b49cc5"
+   "bytes": 1073264,
+   "sha256": "4903b8d2f6aebc76fd015c25996a97c1f720775b2b6d782f5e5dbc2c30ebd02b"
   },
   {
    "path": "ecmwf/z500/north_america_west/2025.nc",
    "asset": "ecmwf__z500__north_america_west__2025.nc",
-   "bytes": 1078479,
-   "sha256": "336708367c368578b9457b651e45f5a4e675c89c6a1afebab4ee7e46d3f49a53"
+   "bytes": 1080509,
+   "sha256": "a39bf36b8683eb75c60678475ae82fa5a9ca47a4c1e83f6c277f3e77ded5c887"
   },
   {
    "path": "ecmwf/z500/north_america_west/2026.nc",
    "asset": "ecmwf__z500__north_america_west__2026.nc",
-   "bytes": 1074969,
-   "sha256": "d9485d7b95d625b3547a54f5879b231d19d888fdd935033044fa303eed7c5686"
+   "bytes": 1076999,
+   "sha256": "4c32fcc456e9fc1c3151ecabe153b1093e16628d0ae067afaf2e9bd4d59ad26f"
   },
   {
    "path": "gfs/frzl/europe/2021.nc",
    "asset": "gfs__frzl__europe__2021.nc",
-   "bytes": 1010885,
-   "sha256": "ef8f1ecd15ec18a46abace5716e944dcf636e98250521099fb820853993f5e1a"
+   "bytes": 1008845,
+   "sha256": "6a32f6280b6fac3488a677ad5b3258c42898ef165099b0f2bcddb0cc35aaae64"
   },
   {
    "path": "gfs/frzl/europe/2022.nc",
    "asset": "gfs__frzl__europe__2022.nc",
-   "bytes": 1028314,
-   "sha256": "ba11d7ccf74d845040361000a4c68c14c317a1e415dc9d29d9ffd74f3323ef78"
+   "bytes": 1026274,
+   "sha256": "a6e66910e0c41fd33ed1dae012ce20230b31da9ce38f29f412781f3558b1bc21"
   },
   {
    "path": "gfs/frzl/europe/2023.nc",
    "asset": "gfs__frzl__europe__2023.nc",
-   "bytes": 1029705,
-   "sha256": "14c0b67413bd180dcb03f2b33bb3f67e27dd9bebe1b02f0e9915d88e264ed320"
+   "bytes": 1027665,
+   "sha256": "2d8d9336317c752084972fd8be2a519b065b0904d78319288a54f2533f979585"
   },
   {
    "path": "gfs/frzl/europe/2024.nc",
    "asset": "gfs__frzl__europe__2024.nc",
-   "bytes": 1018815,
-   "sha256": "ad05424757e0999a4c2baa497fbd46ecf7f4ddc3a727684757baba4db40d0906"
+   "bytes": 1016775,
+   "sha256": "2781832919f67c0938ff9cade324a21163dd134a8ed87bc5fc07b533159c4018"
   },
   {
    "path": "gfs/frzl/europe/2025.nc",
    "asset": "gfs__frzl__europe__2025.nc",
-   "bytes": 1011285,
-   "sha256": "3ef6de5efd5f5a153be665e02ad19a609e737133679c7b730aaf643de6cc3387"
+   "bytes": 1009245,
+   "sha256": "ce928991239eec73ec1063165d63835c528eea3f00c4bfb3ecff298c058bf1cd"
   },
   {
    "path": "gfs/frzl/europe/2026.nc",
    "asset": "gfs__frzl__europe__2026.nc",
-   "bytes": 1000826,
-   "sha256": "22244ffd890deac6e8b012da2e2dc16e7545e09d7959de4f8cc7cddf4e2d5df4"
+   "bytes": 998786,
+   "sha256": "32b3d4af66068044a65f854799aac7d89b4113c0bd2b269b6599f49ddf5f8ef6"
   },
   {
    "path": "gfs/frzl/north_america_west/2021.nc",
    "asset": "gfs__frzl__north_america_west__2021.nc",
-   "bytes": 602145,
-   "sha256": "3acaaf61928ed35523f43d686d779d143ade486f089fd1b852cf47fb19b8c103"
+   "bytes": 600072,
+   "sha256": "ffb3055e187cd1fc8cd3ac5d4ba8b934b7cd9300e54f1600144c18a9b77aad88"
   },
   {
    "path": "gfs/frzl/north_america_west/2022.nc",
    "asset": "gfs__frzl__north_america_west__2022.nc",
-   "bytes": 608326,
-   "sha256": "178f7fa5e24f27c8b3e0a22ddd066f62e7ae1d60829961ad11250fdab6a4b6df"
+   "bytes": 606253,
+   "sha256": "277452e99e4d93b053c6d9d263dd1a5c1a52df1382e3b428100f3477c95a2ca3"
   },
   {
    "path": "gfs/frzl/north_america_west/2023.nc",
    "asset": "gfs__frzl__north_america_west__2023.nc",
-   "bytes": 606399,
-   "sha256": "9f97370bc543117039872b1c77bdae3cbd89f5967c95f1040d8510991410f7e0"
+   "bytes": 604326,
+   "sha256": "520fbccfd9396874f6c6547607e5c90aece8f1d63033051d840f2780c89ba041"
   },
   {
    "path": "gfs/frzl/north_america_west/2024.nc",
    "asset": "gfs__frzl__north_america_west__2024.nc",
-   "bytes": 607238,
-   "sha256": "fa95a23ec5e1d48f0c8a8185f960b80c6fecd71f42331453dff6a4c4c604742f"
+   "bytes": 605165,
+   "sha256": "6b37a3ec2b071d4a8e826b3a874e7dd561dd91c011afadb8d06aa1ad281642e7"
   },
   {
    "path": "gfs/frzl/north_america_west/2025.nc",
    "asset": "gfs__frzl__north_america_west__2025.nc",
-   "bytes": 604476,
-   "sha256": "bf8ef5d2634d3cc212db55b47c0c73df117a92c216520b5e65d062e7dfff6908"
+   "bytes": 602403,
+   "sha256": "06e42588a5473bdaebb6cc6cc2bce998228d30fb35c6e546413160daecd2432a"
   },
   {
    "path": "gfs/frzl/north_america_west/2026.nc",
    "asset": "gfs__frzl__north_america_west__2026.nc",
-   "bytes": 596026,
-   "sha256": "cdd65dfd1b1209a1253e0b79de1ca66d70f177305ee9c4e56d1f2fc605670985"
+   "bytes": 593953,
+   "sha256": "373250681db8637917dcf0fc1230e3db63e4338ba9c4e1b8fec65f3b4a6b83ca"
   },
   {
    "path": "gfs/msl/europe/2021.nc",
    "asset": "gfs__msl__europe__2021.nc",
-   "bytes": 2023063,
-   "sha256": "f128834674cf89c30e508afa90dbcf7d5a29c6ae19f074439c0a396b6a7a4d17"
+   "bytes": 2021365,
+   "sha256": "cb272a946f3d8c65184556002cf903282b7b45ff241ee50a87cbff50fd3aa159"
   },
   {
    "path": "gfs/msl/europe/2022.nc",
    "asset": "gfs__msl__europe__2022.nc",
-   "bytes": 2015452,
-   "sha256": "ac37097a0a8a369eadb98abc2e6a4f3f32fd3036bb4f91e4b232e105c82fc51d"
+   "bytes": 2013754,
+   "sha256": "a424002a043c1b1cef0df210d2fdf2b8257058aa94c81acbe3fcbdf7b0995166"
   },
   {
    "path": "gfs/msl/europe/2023.nc",
    "asset": "gfs__msl__europe__2023.nc",
-   "bytes": 2016655,
-   "sha256": "4e49400f480f4f17aaf979ceed516f674876d98c10e97cbeff404ca5a709cbb5"
+   "bytes": 2014954,
+   "sha256": "cc417e237871e472b08148bd5257d53d718a3ddc20ff894aa9997550a32cf860"
   },
   {
    "path": "gfs/msl/europe/2024.nc",
    "asset": "gfs__msl__europe__2024.nc",
-   "bytes": 2014755,
-   "sha256": "89ded7d95077af5efb8c1b50de3c3755c91590bf6fb86875a8f8e620d2902318"
+   "bytes": 2013057,
+   "sha256": "6a49962b8eb3cf18fd2884958322deee862a673750935f1b2439e602af10c05c"
   },
   {
    "path": "gfs/msl/europe/2025.nc",
    "asset": "gfs__msl__europe__2025.nc",
-   "bytes": 2029564,
-   "sha256": "7d1b648f68985c7949229a3a5a298812f076e4ef54b636733bbae55f04bfde6f"
+   "bytes": 2027863,
+   "sha256": "4e8c8ecf3934bded39a1bc200aed9c252d11943185dbb6c6b1bbdc9fa0273aef"
   },
   {
    "path": "gfs/msl/europe/2026.nc",
    "asset": "gfs__msl__europe__2026.nc",
-   "bytes": 2010470,
-   "sha256": "dae6e0231d02c9fd1173e625be262eb4ac910c3d586fb02463a6fd4775543a86"
+   "bytes": 2008769,
+   "sha256": "95153dc3d534fcd88671b480a671cb9894e90e3146809efb1372f566568dd060"
   },
   {
    "path": "gfs/msl/north_america_west/2021.nc",
    "asset": "gfs__msl__north_america_west__2021.nc",
-   "bytes": 1186752,
-   "sha256": "a7c51b1e0617917b46e1c6441af1ee0d1d22261e3e3d9e10be74d0f112ecff03"
+   "bytes": 1185438,
+   "sha256": "da74330e0eb2298422fc0e87bdb413f43eab449df8e4aa353f3ee7350f303c75"
   },
   {
    "path": "gfs/msl/north_america_west/2022.nc",
    "asset": "gfs__msl__north_america_west__2022.nc",
-   "bytes": 1187620,
-   "sha256": "43866eb88feb617df06a75a2275ba0cc702c2e6f04d1d0535055595e8ee56f06"
+   "bytes": 1186306,
+   "sha256": "554a01280eb38286a5ad5def1952c599e3c2a328307430dbd606fbbaf4cc9ba9"
   },
   {
    "path": "gfs/msl/north_america_west/2023.nc",
    "asset": "gfs__msl__north_america_west__2023.nc",
-   "bytes": 1183051,
-   "sha256": "d731d54d15ce502bfa6eec6f98e993a5c2ddc69cce9ec6446e7d5781d974e7cc"
+   "bytes": 1181734,
+   "sha256": "cc7596fcd121cd61f0d5094515f8b1f77b703704d8f4703cd2be34d18a7043b9"
   },
   {
    "path": "gfs/msl/north_america_west/2024.nc",
    "asset": "gfs__msl__north_america_west__2024.nc",
-   "bytes": 1187081,
-   "sha256": "19571513bc34d6bc4c2ddb8ff7cbbb5b897f845d969a6bb3c532fca0a2105078"
+   "bytes": 1185767,
+   "sha256": "511e20b8433a394c4e00d922fac3149f28503d218191ff4a78b41611900b00c7"
   },
   {
    "path": "gfs/msl/north_america_west/2025.nc",
    "asset": "gfs__msl__north_america_west__2025.nc",
-   "bytes": 1193209,
-   "sha256": "29cde8c2715e460c512f810345326c245ffa019483ec2c350d43ffc71425d05a"
+   "bytes": 1191892,
+   "sha256": "db8802a7ea248c6e52eca5848119f454623abfd2dce8262a30c57d2a2aeb6870"
   },
   {
    "path": "gfs/msl/north_america_west/2026.nc",
    "asset": "gfs__msl__north_america_west__2026.nc",
-   "bytes": 1193152,
-   "sha256": "592b3dfe4a09bc53ae4a6780a675e276773aa9fd603f77cfd07c840c55ad48b4"
+   "bytes": 1191835,
+   "sha256": "6c29e022350005a9ec8bcf6840e62d5cb223f28ab90895e00081845389b0cde7"
+  },
+  {
+   "path": "gfs/swe/europe/2021.nc",
+   "asset": "gfs__swe__europe__2021.nc",
+   "bytes": 592431,
+   "sha256": "dbf9920803e7722d5728a79bdad483c75e204b056070adb25feb31b491c2d19f"
+  },
+  {
+   "path": "gfs/swe/europe/2022.nc",
+   "asset": "gfs__swe__europe__2022.nc",
+   "bytes": 593062,
+   "sha256": "79a199a3cd57589b3c503a95a76a9d36415d8480cc14abe9db4d2d3410b08adb"
+  },
+  {
+   "path": "gfs/swe/europe/2023.nc",
+   "asset": "gfs__swe__europe__2023.nc",
+   "bytes": 619385,
+   "sha256": "4989b078ba16e8f5d5884c7b570b3ee8af58d373cefbb99d8c096bad2a54ef89"
+  },
+  {
+   "path": "gfs/swe/europe/2024.nc",
+   "asset": "gfs__swe__europe__2024.nc",
+   "bytes": 605115,
+   "sha256": "0492c60d6fe93f432c2454e8b6f714e5a57a2b693209bb360fa1c521ea2cf07a"
+  },
+  {
+   "path": "gfs/swe/europe/2025.nc",
+   "asset": "gfs__swe__europe__2025.nc",
+   "bytes": 606500,
+   "sha256": "20f144c24c43219219a92b9b5a0b68713627a7fc63fbd17faf510cd1e1d11738"
+  },
+  {
+   "path": "gfs/swe/europe/2026.nc",
+   "asset": "gfs__swe__europe__2026.nc",
+   "bytes": 618542,
+   "sha256": "4c77c8cbd7381d8d8c006ab8112c833e218d03a01ec4ec1b19ba961f261d8b76"
+  },
+  {
+   "path": "gfs/swe/north_america_west/2021.nc",
+   "asset": "gfs__swe__north_america_west__2021.nc",
+   "bytes": 429446,
+   "sha256": "798379d16a6ef13ec1cc30d2890ea11bcd5d19c5b0382dde53e5f8c6fa20c37b"
+  },
+  {
+   "path": "gfs/swe/north_america_west/2022.nc",
+   "asset": "gfs__swe__north_america_west__2022.nc",
+   "bytes": 423154,
+   "sha256": "0df759b6cc61c42e7dc0701ffa7054b2fc3f91ebcd1404f36164b5039b649244"
+  },
+  {
+   "path": "gfs/swe/north_america_west/2023.nc",
+   "asset": "gfs__swe__north_america_west__2023.nc",
+   "bytes": 431425,
+   "sha256": "25b871a7742dbfbe97b65568cb09d7e6998aa804ca953dc4dc0cbdc64a644636"
+  },
+  {
+   "path": "gfs/swe/north_america_west/2024.nc",
+   "asset": "gfs__swe__north_america_west__2024.nc",
+   "bytes": 431070,
+   "sha256": "4e6d6bdd4a0cab1afd1e7a7930f279ca1bfb4237c8965f8d0f8cadb31f653542"
+  },
+  {
+   "path": "gfs/swe/north_america_west/2025.nc",
+   "asset": "gfs__swe__north_america_west__2025.nc",
+   "bytes": 432870,
+   "sha256": "352ef9ae982e9286dbb08de47974c6cb2b3fe3a43567d02184eac49a1c788cdc"
+  },
+  {
+   "path": "gfs/swe/north_america_west/2026.nc",
+   "asset": "gfs__swe__north_america_west__2026.nc",
+   "bytes": 432024,
+   "sha256": "ab16df0e0a0ffbffa61429685fbdd81d0c269e723070264537f8f2cd443ff9a3"
   },
   {
    "path": "gfs/t2m/europe/2021.nc",
    "asset": "gfs__t2m__europe__2021.nc",
-   "bytes": 2329613,
-   "sha256": "b8d80f829857f26c1758e9b886283dd26a0695f2d0575d684834a06cd359839a"
+   "bytes": 2328833,
+   "sha256": "df166623953eb5441b051cbed9c32d4767bd5a15f9210d4663ee2f9276008c60"
   },
   {
    "path": "gfs/t2m/europe/2022.nc",
    "asset": "gfs__t2m__europe__2022.nc",
-   "bytes": 2313984,
-   "sha256": "a14f6240733d8d6fabf46a92bac3f4fd153b59692c1280a3e3ef7d36534f5338"
+   "bytes": 2313204,
+   "sha256": "aff15ba8e66f739f784b8000b9b2891d9d03126d7407d3fda171f65fd0953377"
   },
   {
    "path": "gfs/t2m/europe/2023.nc",
    "asset": "gfs__t2m__europe__2023.nc",
-   "bytes": 2317104,
-   "sha256": "e1d8ca6283c94d8c38b4f0e4d8765b4033560e54635353edc79bae3b30138b74"
+   "bytes": 2316321,
+   "sha256": "7f5a7517a6ded6233387a0ada17c76d7064f3b3cf637e53299cedac947dcb55a"
   },
   {
    "path": "gfs/t2m/europe/2024.nc",
    "asset": "gfs__t2m__europe__2024.nc",
-   "bytes": 2317254,
-   "sha256": "3f6a5463b80bd67f094b581a622e36098dd23699a62b23edd4baa17d3171ebb3"
+   "bytes": 2316474,
+   "sha256": "8695851588140ed045f8b5522355addf8f18936eb2203a659504428acef07f09"
   },
   {
    "path": "gfs/t2m/europe/2025.nc",
    "asset": "gfs__t2m__europe__2025.nc",
-   "bytes": 2309834,
-   "sha256": "6e1aef0be343f5debed751d1aa77f1728ce039a58e1d5abecc9f830c1a776a61"
+   "bytes": 2309051,
+   "sha256": "fb5bc781681d576b1bf0e4cd48107166e856fb476884fe8af1d75578adf9b09d"
   },
   {
    "path": "gfs/t2m/europe/2026.nc",
    "asset": "gfs__t2m__europe__2026.nc",
-   "bytes": 2331152,
-   "sha256": "853666d428902fc9fe6eb47445d772a041021a9b66023749029c7b61c8e9e615"
+   "bytes": 2330369,
+   "sha256": "d36b2ef54274c4e4aa580b0d91d6a385f9b669efef73b2afcf6b5bf3bc7ae623"
   },
   {
    "path": "gfs/t2m/north_america_west/2021.nc",
    "asset": "gfs__t2m__north_america_west__2021.nc",
-   "bytes": 1273399,
-   "sha256": "c45ddb97e315d37f5910c0e2e9c5d5f2df02bf3a95b04ce95f03145626b2ecc8"
+   "bytes": 1272085,
+   "sha256": "afde4f84a5b90552abc439de8ba6d9813aa04ea63f837247f380101ce4ecec13"
   },
   {
    "path": "gfs/t2m/north_america_west/2022.nc",
    "asset": "gfs__t2m__north_america_west__2022.nc",
-   "bytes": 1281117,
-   "sha256": "ea2414d9f5b88cc3749e8d2a09809dc06ca9b29b92a3c5886cabf61aefe1dd6a"
+   "bytes": 1279803,
+   "sha256": "bea1242a12a0640b52e0e038fc9ba94d595aced855ff59c13a3e89d647b47e61"
   },
   {
    "path": "gfs/t2m/north_america_west/2023.nc",
    "asset": "gfs__t2m__north_america_west__2023.nc",
-   "bytes": 1267713,
-   "sha256": "033e5d7efe27785876b5267b675b592bf88af506ea432ff49cf4bb8934ba5293"
+   "bytes": 1266396,
+   "sha256": "50c248d7d7c4825f5c2e982f57d10a8d00433e3c68349a77bd4e5894f81a8568"
   },
   {
    "path": "gfs/t2m/north_america_west/2024.nc",
    "asset": "gfs__t2m__north_america_west__2024.nc",
-   "bytes": 1275161,
-   "sha256": "e4008a171323ea4644158000566501a24dfb8a4089447972ee7dcc456aef2c51"
+   "bytes": 1273847,
+   "sha256": "5e6204d39db324aa55321252a404131f92fe12119057f5e863b0bca058ff8693"
   },
   {
    "path": "gfs/t2m/north_america_west/2025.nc",
    "asset": "gfs__t2m__north_america_west__2025.nc",
-   "bytes": 1278490,
-   "sha256": "a1181ab50d02d25ea558a9d244f3b73fbc28237e33e54ef89409589a96d0a832"
+   "bytes": 1277173,
+   "sha256": "eaeebd24c6e7a9c879856087b5d3c849c1a25bf877b3b178a4b90af198e6449f"
   },
   {
    "path": "gfs/t2m/north_america_west/2026.nc",
    "asset": "gfs__t2m__north_america_west__2026.nc",
-   "bytes": 1280563,
-   "sha256": "34a8ecdf9894b3a97874d43ee98d2d975581b4b938fc50519314632ed0d04f57"
+   "bytes": 1279246,
+   "sha256": "786838b016d8d20985ac979e91b7c56d14e4ca330848bafc5f8b72da8e82ea51"
+  },
+  {
+   "path": "gfs/tp24/europe/2021.nc",
+   "asset": "gfs__tp24__europe__2021.nc",
+   "bytes": 2331361,
+   "sha256": "022aad416d015f4a9141a368e3df8fa7f7a31bcb67226f01226cdce5e35df7d3"
+  },
+  {
+   "path": "gfs/tp24/europe/2022.nc",
+   "asset": "gfs__tp24__europe__2022.nc",
+   "bytes": 2414030,
+   "sha256": "1afcf0ac38063453c06fff0772f6969447a3f98ec997cd2eb00891529921c2f0"
+  },
+  {
+   "path": "gfs/tp24/europe/2023.nc",
+   "asset": "gfs__tp24__europe__2023.nc",
+   "bytes": 2430784,
+   "sha256": "5848ee84ec33d533c4568216cc82db62d686ea49d446015f73fe7987a34f15ca"
+  },
+  {
+   "path": "gfs/tp24/europe/2024.nc",
+   "asset": "gfs__tp24__europe__2024.nc",
+   "bytes": 2433555,
+   "sha256": "d5e5d80b96a1ae52ab29c2e07643c9fe4e5e0a70e9de5eae3b2368bbfac0b5e9"
+  },
+  {
+   "path": "gfs/tp24/europe/2025.nc",
+   "asset": "gfs__tp24__europe__2025.nc",
+   "bytes": 2421917,
+   "sha256": "0130a223308fe985f3752fadefbdf4410b587357246802db0c2131956d49efa2"
+  },
+  {
+   "path": "gfs/tp24/europe/2026.nc",
+   "asset": "gfs__tp24__europe__2026.nc",
+   "bytes": 2299950,
+   "sha256": "5b7bcab7404e49ce8d882dcb3747343cddfa1d9ceccf4edbe40af38778b834de"
+  },
+  {
+   "path": "gfs/tp24/north_america_west/2021.nc",
+   "asset": "gfs__tp24__north_america_west__2021.nc",
+   "bytes": 1322690,
+   "sha256": "3b7673c4276ab6be9361d26d71629313c5e031c3ad2d6a7885ecb6e4948563db"
+  },
+  {
+   "path": "gfs/tp24/north_america_west/2022.nc",
+   "asset": "gfs__tp24__north_america_west__2022.nc",
+   "bytes": 1350586,
+   "sha256": "98606ce6d0b579c2c7bbc322e1e085a8808f3267853fe86e689fc61e87560442"
+  },
+  {
+   "path": "gfs/tp24/north_america_west/2023.nc",
+   "asset": "gfs__tp24__north_america_west__2023.nc",
+   "bytes": 1360903,
+   "sha256": "f3d1b06ed308188046e15d320e0c7832732de60a1290952616cba9db5fc62fd1"
+  },
+  {
+   "path": "gfs/tp24/north_america_west/2024.nc",
+   "asset": "gfs__tp24__north_america_west__2024.nc",
+   "bytes": 1359553,
+   "sha256": "248b0b5d1d8b66bcc64c22f2e80a8ae6ae90a58966564d55268b90276ce737ee"
+  },
+  {
+   "path": "gfs/tp24/north_america_west/2025.nc",
+   "asset": "gfs__tp24__north_america_west__2025.nc",
+   "bytes": 1359055,
+   "sha256": "c6c57038c55a58aec142894aa721752a3444ea11daf2d302ff2095a11735aff8"
+  },
+  {
+   "path": "gfs/tp24/north_america_west/2026.nc",
+   "asset": "gfs__tp24__north_america_west__2026.nc",
+   "bytes": 1293482,
+   "sha256": "06217c6e1a1d82a2a5f30bc6df94bc63984f427d5a8f8ce6e6aa1a91c332ce4d"
   },
   {
    "path": "gfs/ws10/europe/2021.nc",
    "asset": "gfs__ws10__europe__2021.nc",
-   "bytes": 2325506,
-   "sha256": "a7dccf9217a9b08281445ffa46525f48e07c50df64313a8537fabb7213aaa13d"
+   "bytes": 2326028,
+   "sha256": "2784afe434a72274338eeee28f4cad20fff29c4d6721be4da4dc1f070bda137b"
   },
   {
    "path": "gfs/ws10/europe/2022.nc",
    "asset": "gfs__ws10__europe__2022.nc",
-   "bytes": 2323262,
-   "sha256": "984dda2da85c25cc485c5864765d3d0a559c6690cab3e60ce74f9f896f5b43c4"
+   "bytes": 2323784,
+   "sha256": "409fee6f2cb21b6862830a594fed26ffbec5b58bf6798b409221682f3ccc9c1b"
   },
   {
    "path": "gfs/ws10/europe/2023.nc",
    "asset": "gfs__ws10__europe__2023.nc",
-   "bytes": 2313067,
-   "sha256": "def72f7315c8bc0ff3c716d0547d7977c36ebea6672b0908e59f13fb88b87fbf"
+   "bytes": 2313586,
+   "sha256": "2853ddc54440e568e4d62864fab33ae89d2afe1e09b130590d6945b7b34c0daa"
   },
   {
    "path": "gfs/ws10/europe/2024.nc",
    "asset": "gfs__ws10__europe__2024.nc",
-   "bytes": 2316630,
-   "sha256": "3e3d753af304ce0a81100c9a9771e61846acafdf1b41a5541ad7a292dd1a95d1"
+   "bytes": 2317152,
+   "sha256": "30981c9cddc4002ef9f269de3cd0ce46a186377bfd1f3eb9836168962e27b2d6"
   },
   {
    "path": "gfs/ws10/europe/2025.nc",
    "asset": "gfs__ws10__europe__2025.nc",
-   "bytes": 2318571,
-   "sha256": "e55c862c1c894878234c021dd9ab5dabd77155ac4524ad001c47d78d889ea2d3"
+   "bytes": 2319090,
+   "sha256": "356f2defe2c3f3add7a3afd7ad3ac29410707a51909cf02fde30818804e16e18"
   },
   {
    "path": "gfs/ws10/europe/2026.nc",
    "asset": "gfs__ws10__europe__2026.nc",
-   "bytes": 2326859,
-   "sha256": "5f89f0ce3612f126247e75ed5162ab05555efd2a1b832e61d7854c57a3d8fe08"
+   "bytes": 2327378,
+   "sha256": "133bec7c92888cd8a96531d9e1a6d36ecdaadcfc509f0efd3674e2bbd271727e"
   },
   {
    "path": "gfs/ws10/north_america_west/2021.nc",
    "asset": "gfs__ws10__north_america_west__2021.nc",
-   "bytes": 1285695,
-   "sha256": "0de743e7e95e043151f21d74f18688cb0dd7fbfd86559030d65ee98bf339e13f"
+   "bytes": 1286953,
+   "sha256": "67fd8d6d3b87597bb8c6d17676c83c56d8febb4745605c6c1b0ad9e409a2fbfd"
   },
   {
    "path": "gfs/ws10/north_america_west/2022.nc",
    "asset": "gfs__ws10__north_america_west__2022.nc",
-   "bytes": 1284226,
-   "sha256": "b6996af67d9790a9caae6dde24a8234f53544cc9e8413dd5dd2adb0cdee08ff9"
+   "bytes": 1285484,
+   "sha256": "8209ea1504c39806309a2e512a2ee41d22fc5d1d2178f7942975c16dc1be1f1d"
   },
   {
    "path": "gfs/ws10/north_america_west/2023.nc",
    "asset": "gfs__ws10__north_america_west__2023.nc",
-   "bytes": 1276615,
-   "sha256": "4376c78f3de7386537524a9d8c7fd69610d40f43130b864ca42ce18d09aad9a3"
+   "bytes": 1277870,
+   "sha256": "460e26c7df1cd0ce4cab20a7f26f7a086015adf6d41be9edf9b4934add0eb3f5"
   },
   {
    "path": "gfs/ws10/north_america_west/2024.nc",
    "asset": "gfs__ws10__north_america_west__2024.nc",
-   "bytes": 1274900,
-   "sha256": "1b44f9886d01cb06e5c4f36e9ddbb143c866082ae35244765a233d5a47c82858"
+   "bytes": 1276158,
+   "sha256": "a21209dd2b338e5b95f855f8c8b32494662364a7a1274346fb2114b07b9e4b54"
   },
   {
    "path": "gfs/ws10/north_america_west/2025.nc",
    "asset": "gfs__ws10__north_america_west__2025.nc",
-   "bytes": 1275582,
-   "sha256": "c129f40e65162d4efd81458265f52cbf185f856cb08adfeb4bac13faa72c8077"
+   "bytes": 1276837,
+   "sha256": "3337b8d47a8c709d465abb58a708501f447d356d5e2ae8920c1a34bd865b201b"
   },
   {
    "path": "gfs/ws10/north_america_west/2026.nc",
    "asset": "gfs__ws10__north_america_west__2026.nc",
-   "bytes": 1282860,
-   "sha256": "a93191c0e97d9b6e1ad030a73c57d5a6734e8bf25a74151f3e6bbd7eaecdcc0f"
+   "bytes": 1284115,
+   "sha256": "42fded0b60fd4420a99929380963204424003f4b5a8c404eabfe99a85b51e99c"
   },
   {
    "path": "gfs/z500/europe/2021.nc",
    "asset": "gfs__z500__europe__2021.nc",
-   "bytes": 1895072,
-   "sha256": "be7cc4a25a0f606b78b7629fcdec3af200aaeb19a449fad6056771fb585582a9"
+   "bytes": 1896367,
+   "sha256": "9df42e18dafa9190a0ab066ef6c8b2db2bc0e7692b58d70109e9e6781f541555"
   },
   {
    "path": "gfs/z500/europe/2022.nc",
    "asset": "gfs__z500__europe__2022.nc",
-   "bytes": 1897475,
-   "sha256": "f39907c029e0f4a5a820758ec4839a94ec2372fea212733491f9b1eb9443eb45"
+   "bytes": 1898770,
+   "sha256": "b18fcfd3971be2f29ac17abb1df2c772883265037a53f4e2372710b60dfdda9e"
   },
   {
    "path": "gfs/z500/europe/2023.nc",
    "asset": "gfs__z500__europe__2023.nc",
-   "bytes": 1896129,
-   "sha256": "5cc04442650a39f6ff736e762af25aaf3bcfabdd64a0e8691792a54a0120cf26"
+   "bytes": 1897421,
+   "sha256": "2081b48bc6799fc453c2f4a1d71e01f2ffd94cb439b5b89e3a06eff4964af904"
   },
   {
    "path": "gfs/z500/europe/2024.nc",
    "asset": "gfs__z500__europe__2024.nc",
-   "bytes": 1899360,
-   "sha256": "97d187ef2f2aea84927a88c1e8efe5cb4ce761b194065641391c4c4975b4377d"
+   "bytes": 1900655,
+   "sha256": "8110d8e1aa2bd3fc2e2b493b272658543796865ba05c1fa66da45402648ce50f"
   },
   {
    "path": "gfs/z500/europe/2025.nc",
    "asset": "gfs__z500__europe__2025.nc",
-   "bytes": 1897064,
-   "sha256": "c703848e700faaf9219e8a413ae612418e47013ea6519279a818724a2b21ac67"
+   "bytes": 1898356,
+   "sha256": "080f57db8a549cc5adb17197b7d325f4d01ed251cc6ca83919af0e67114fd569"
   },
   {
    "path": "gfs/z500/europe/2026.nc",
    "asset": "gfs__z500__europe__2026.nc",
-   "bytes": 1900160,
-   "sha256": "7ee44a456c25a5f8ff1433d18311436fa7a897ec262ad9cd0feb5d03c82aa35e"
+   "bytes": 1901452,
+   "sha256": "8044a48a8cdd49fc4c0991d850b79b8391d891ab7e8950c733a1a498bfd75c7f"
   },
   {
    "path": "gfs/z500/north_america_west/2021.nc",
    "asset": "gfs__z500__north_america_west__2021.nc",
-   "bytes": 1079193,
-   "sha256": "0dc93b99f62b8f715dd679ad7a3cda8deb00a421b077d73406c6c3a7060984f9"
+   "bytes": 1081224,
+   "sha256": "695012a681cc1c259df66c67a37a3b51ffb9898110c1b52074152983e2da38d1"
   },
   {
    "path": "gfs/z500/north_america_west/2022.nc",
    "asset": "gfs__z500__north_america_west__2022.nc",
-   "bytes": 1082736,
-   "sha256": "cd16300da9e061485f7b6e7e3bd934fd79995d46e184b1aefc8197d7c3b6bbd2"
+   "bytes": 1084767,
+   "sha256": "b2b6a0187ec85609b49fb09baee2dc0af2c0d0427078885b6cda2aff1eb3400e"
   },
   {
    "path": "gfs/z500/north_america_west/2023.nc",
    "asset": "gfs__z500__north_america_west__2023.nc",
-   "bytes": 1076737,
-   "sha256": "396f2437f8eb64ac96aedcf3a032937e9c1a3f527201cdb985838e5d84e805bf"
+   "bytes": 1078765,
+   "sha256": "8a29f38c7f505c48d8af6bbfaa25b38f73a46cae412f3bf6295f8ea3f4fd4f65"
   },
   {
    "path": "gfs/z500/north_america_west/2024.nc",
    "asset": "gfs__z500__north_america_west__2024.nc",
-   "bytes": 1071512,
-   "sha256": "4ddd8480463f15d5aaf9fa5e0f13d9f3f20d381d7659685d4a609544a01632cd"
+   "bytes": 1073543,
+   "sha256": "26f8fd7ee9766f7ef4542a7bb4fc7b0dcc284c228f9b27e3fb7c569c2ed5af2a"
   },
   {
    "path": "gfs/z500/north_america_west/2025.nc",
    "asset": "gfs__z500__north_america_west__2025.nc",
-   "bytes": 1079382,
-   "sha256": "b900a1c24d97cc13587a1bba8f49e32e764ee316dbf757284ce4b7473ae23aa4"
+   "bytes": 1081410,
+   "sha256": "05fcd89da2c38e54112453122da79c6b923a3dddfed361f5c151ebc2203ad5fc"
   },
   {
    "path": "gfs/z500/north_america_west/2026.nc",
    "asset": "gfs__z500__north_america_west__2026.nc",
-   "bytes": 1078523,
-   "sha256": "dac418fe127141d32d01b8a37e9d49a479523a22df19f3978e690b5188a8308a"
+   "bytes": 1080551,
+   "sha256": "8f77c8b9adc0d9d1f5e659a65bae48a6dfd5a58a9751058b438bd60044df84f3"
   }
  ]
 }

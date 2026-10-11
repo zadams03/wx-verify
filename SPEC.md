@@ -52,12 +52,14 @@ This project is explicitly a learning exercise in parallel with a portfolio deli
 | 10m wind speed | `ws10` | m/s | GFS, ECMWF | Bias, RMSE, ACC | 10 |
 | Freezing level (highest tropospheric freezing level, height above sea level) | `frzl` | m above sea level | GFS only | Bias, RMSE (no ACC — see note) | 10 |
 | 24h total precipitation | `tp24` | mm | GFS, ECMWF | Frequency bias, ETS, mean bias | 11 |
-| Snow depth water equivalent | `swe` | mm | GFS, ECMWF | Bias, RMSE (stretch) | 11 |
+| Snow depth water equivalent | `swe` | mm | GFS only (ECMWF parked: open data has `sd` only from 2025-11-20) | Bias, RMSE (stretch) | 11 |
 
 - Wind speed is computed from u/v components *before* verification (verify the scalar, not the vector).
 - ECMWF open data has no freezing-level field; deriving it from coarse pressure levels is not worth the error it introduces.
 - **Freezing level — GFS field.** GFS `HGT:highest tropospheric freezing level` (gpm above sea level), not `HGT:0C isotherm`. Where a sub-zero layer sits under warmer air (an inversion) there are several 0°C crossings; the 0C isotherm field reports a low one (hundreds of metres, often near the ground), whereas ERA5 `deg0l` agrees with the upper crossing. This is inferred from the data (Phase 10b build notes), not from documentation: the ECMWF parameter pages found (parameter 228024, the zero-degree-level chart description) do not say which crossing is reported.
 - **Freezing level — symmetric mask.** A point and forecast are verified only if both sources put the freezing level above their own surface: ERA5 `deg0l > 0` **and** GFS freezing level above GFS `HGT:surface`. Exclusions are counted separately (ERA5 only, GFS only, both) and the dashboard's excluded share is the combined mask. Because the mask makes the sample vary by point and time, freezing level gets bias and RMSE only, not ACC.
+- **24h precipitation.** The total over the 24 hours *ending* at each lead: acc(L) − acc(L − 24 h) from the from-initialisation accumulation (GFS continuous `APCP:surface:0-N day acc fcst`; ECMWF `tp`, metres → mm), acc(24 h) itself at the 24 h lead; slightly negative differences (packing noise) are set to 0 and counted. ERA5 truth is the sum of the 24 hourly `total_precipitation` values ending at the valid time. An event is a total ≥ threshold in forecast and ERA5; contingency counts are cos(lat)-weighted, pooled and stored as sums. No ACC, no climatology.
+- **Snow water equivalent.** GFS `WEASD:surface` against ERA5 `sd` (m of water equivalent → mm). GFS has no value over open water, so the sample is where GFS is defined; ERA5's fixed 10 m glacier placeholder is treated as undefined. Both exclusions are counted and shown.
 - The ws10 climatology must be the mean of wind *speed*, not the speed of the mean wind vector.
 
 ### 3.2 Models
@@ -143,7 +145,7 @@ wx-verify/
 │   ├── processed/             ← gitignored
 │   │   ├── aggregates/        ← Monthly sufficient statistics + region sums per model/variable/domain
 │   │   └── climatology/       ← 1991–2020 normal by month and UTC hour, per variable/domain
-│   └── dashboard/             ← Committed: region_monthly.parquet, coverage.parquet, maps_manifest.json. maps/ is gitignored (hosted, see 4.4)
+│   └── dashboard/             ← Committed: region_monthly.parquet, region_categorical.parquet, coverage.parquet, maps_manifest.json. maps/ is gitignored (hosted, see 4.4)
 │
 ├── logs/                      ← gitignored. pipeline.log, pid file
 │
@@ -156,6 +158,7 @@ wx-verify/
 │   ├── data/
 │   │   ├── base_fetcher.py    ← Abstract base class — fetch_month(variable, domain, year, month)
 │   │   ├── byterange.py       ← Shared byte-range fetcher (parallel requests, retries, present mask) for GFS and ECMWF
+│   │   ├── accumulation.py    ← Precipitation windows: forecast accumulation differences, ERA5 hourly 24h sums
 │   │   ├── registry.py        ← Variable registry: per-source field names and unit conversions (wind speed from u/v, ERA5 derivations)
 │   │   ├── map_store.py       ← Hosted map files: manifest builder, local-first lookup, cached download from the GitHub Release
 │   │   ├── gfs_fetcher.py     ← GFS archive acquisition (AWS byte-range)
@@ -166,6 +169,7 @@ wx-verify/
 │   ├── processing/
 │   │   ├── alignment.py       ← Exact valid-time alignment; homogeneous-sample rule
 │   │   ├── climatology.py     ← 1991–2020 normal; anomalies by valid month and hour
+│   │   ├── categorical.py     ← Contingency counts, frequency bias, ETS (precipitation)
 │   │   ├── metrics.py         ← Sufficient statistics; bias, RMSE, temporal/spatial (centred + uncentred) ACC
 │   │   ├── aggregate.py       ← Monthly aggregation, validation, atomic writes
 │   │   ├── tables.py          ← Region, coverage and map tables for the dashboard
@@ -268,7 +272,7 @@ Goal: least disk space, exact metrics for any date window, and a small committed
 
 1. **Raw** (`data/raw/{source}/{domain}/…`, gitignored): only the configured domains, only 00z/12z. GFS global fields are subset to each domain in memory at fetch time. ERA5 files are per variable and month and hold the raw CDS fields the registry names (`u10`+`v10` for ws10, `deg0l`+`z` for frzl); the variables of a domain-month are requested together, one CDS request per dataset and level per **year**, because queue time dominates small requests. Deleted after aggregation when `keep_raw: false`.
 2. **Monthly aggregates** (`data/processed/aggregates/{model}/{variable}/{domain}/{YYYY-MM}.nc`, gitignored): per grid point and lead time, the sufficient statistics — count, Σe, Σe², Σf′, Σo′, Σf′², Σo′², Σf′o′ (e = forecast − ERA5, ′ = anomaly vs climatology); for precipitation, contingency counts (hits, misses, false alarms, correct negatives) per threshold. Any date window's grid-point bias/RMSE/temporal ACC is an exact sum over months.
-3. **Region tables** (`data/dashboard/region_monthly.parquet`, committed): per model × variable × region × lead time × month — area-weighted pooled sums for bias/RMSE, the sum and count of per-forecast spatial ACC, and pooled contingency counts. Skill curves and metric cards are exact for any month window.
+3. **Region tables** (`data/dashboard/region_monthly.parquet`, committed): per model × variable × region × lead time × month — area-weighted pooled sums for bias/RMSE, the sum and count of per-forecast spatial ACC (for precipitation also Σw·forecast and Σw·ERA5). Weighted contingency counts per region × lead × threshold × month are in `region_categorical.parquet`. Skill curves and metric cards are exact for any month window.
 4. **Map tables** (`data/dashboard/maps/…`, committed): grid-point statistics summed per **year** at native 0.25°, float32 + zlib, storing only what the maps need (n, Σe, Σe², Σf′², Σo′², Σf′o′ — n may be stored per lead time if constant). Maps for a selected window use the whole years it covers; the dashboard states this. Resolution is never reduced to meet the budget; map files move to cloud hosting instead. Paired (comparison) map files are written only for years whose paired run set differs from the standalone one; otherwise the dashboard reads the standalone file.
 5. **Size budget and hosting:** committed `data/dashboard/` (everything except `maps/`) ≤ 150 MB. From Phase 10, **map files are hosted as assets on a GitHub Release** (a data release tagged `maps-YYYYMMDD`, independent of code tags), not in git. A committed manifest (`data/dashboard/maps_manifest.json`: release tag, file list, sizes, SHA-256) tells the dashboard what to fetch; it downloads each map file on first use and caches it, using local files when present. Region and coverage tables stay in git. The repository must be **public**: release assets of a private repo return 404 to the unauthenticated dashboard (found at v1.7 deploy; repo made public 9 Oct 2026).
 
@@ -526,11 +530,23 @@ Build steps:
 **Learning checkpoint before starting:** Why RMSE is a poor score for precipitation (skewed, intermittent); contingency tables, frequency bias, ETS; how GFS and ECMWF store accumulated precipitation (GFS bucket resets vs ECMWF accumulation from initialisation); ERA5 precipitation and snow quality in mountains.
 
 Build steps:
-77. Kickoff checks: accumulation conventions per source; SWE field names/units (known from Phase 9: ECMWF open data has `sd` only from 2025-11-20, so ECMWF SWE is expected to be parked; GFS-only SWE is the fallback) (GFS `WEASD` kg m⁻², ECMWF/ERA5 `sd` m water equivalent) and availability across the whole record. If SWE is not consistently available, park it (Outstanding Issues) — do not force it.
-78. `tp24` derivation per source (24h window ending at each lead time); contingency-count aggregation; frequency bias and ETS.
-79. Dashboard: threshold selector; precipitation views show frequency bias and ETS instead of RMSE/ACC.
-80. `swe` (stretch) as a continuous variable.
-81. Audit, commit: "Phase 11 complete — precipitation and snow".
+77. ✓ Kickoff checks: accumulation conventions per source; SWE field names/units (known from Phase 9: ECMWF open data has `sd` only from 2025-11-20, so ECMWF SWE is expected to be parked; GFS-only SWE is the fallback) (GFS `WEASD` kg m⁻², ECMWF/ERA5 `sd` m water equivalent) and availability across the whole record. If SWE is not consistently available, park it (Outstanding Issues) — do not force it.
+78. ✓ `tp24` derivation per source (24h window ending at each lead time); contingency-count aggregation; frequency bias and ETS.
+79. ✓ Dashboard: threshold selector; precipitation views show frequency bias and ETS instead of RMSE/ACC.
+80. ✓ `swe` (stretch) as a continuous variable.
+81. ✓ Audit, commit: "Phase 11 complete — precipitation and snow".
+
+**Phase 11 build notes (Oct 2026 audit):**
+- **Sources (step 77, checked against live archives).** GFS `APCP:surface` has two entries at every multiple-of-24 step: the 6-hour bucket (`{L-6}-{L} hour acc fcst`) and the continuous accumulation `0-{L/24} day acc fcst` (f024 `0-1 day`, f096 `0-4 day`, f216 `0-9 day`, f240 `0-10 day`); present on every date sampled 2021-03-23 … 2026-09-20. Four 6-hour buckets agree with the continuous field to within 0.19 mm (GRIB packing). ECMWF `tp` (paramId 228, `accum`, metres) is accumulated from step 0 and monotone between steps. Needed steps: 24, 48, 72, 96, 120, 216, 240. ERA5 `total_precipitation` is hourly, float32, metres; requesting it together with an instantaneous variable makes CDS return a zip of two files, so it is requested on its own (all 24 hours per day, year-sized jobs, compressed monthly files of ~15–22 MB for Europe).
+- **ERA5 time stamp.** Hourly accumulations are taken as stamped with the end of their hour (ECMWF convention as understood; not re-read from the documentation in this session). Check against IFS HRES 3-hourly accumulations (Europe, 15 Jan and 15 Jul 2025, steps 12–36): end-of-hour stamps correlate 0.774 (Jan) / 0.461 (Jul), start-of-hour 0.722 / 0.434, a further 1 h shift 0.768 / 0.466. Start-of-hour is clearly worse; end-of-hour and +1 h fit about equally, so the check supports but does not prove the convention (Issue 019).
+- **Derivation.** `window_totals` differences the accumulations at the raw file's steps; `hourly_window_sums` sums the 24 stamps t−23 h … t for valid hours 00/12, dropping windows with a missing hour. Negative differences are set to 0 and counted (`n_clipped` in the aggregate attributes): GFS 426 (Europe) and 204 (North America) grid values over the whole record (<1e-6 of values), ECMWF 2.36 M and 1.49 M (~0.8–1 %, ECMWF packs `tp` more coarsely); a difference below −1 mm is an error.
+- **Storage.** Grid aggregates gain `hits`, `false_alarms`, `misses`, `correct_negatives` (threshold, lead, lat, lon, unweighted) and Σforecast/ΣERA5; monthly `_categorical.parquet` files hold the weighted counts, `region_categorical.parquet` the committed table (with `comparison`). Map files store the four counts (int16) per threshold; frequency bias and ETS are formed after summing.
+- **Run results.** tp24: europe and north_america_west, 67 months each, GFS 4,014 of 4,016 runs verified (Issue 009 runs), ECMWF 1,926 of 1,926, paired 1,926; 0 failures. ~4.2 h wall time per domain (both in parallel; CDS queue and ECMWF fetch). The ECMWF mirror rate-limited (503 SlowDown) a 7-step month and 2 runs were lost after all retries; ECMWF requests now use 3 workers and the month was re-run (62 of 62). CDS began rejecting jobs for its queue limit ("rejected"); `_retrieve` now waits 180 s and resubmits. swe: both domains 67 months, 4,014 of 4,016 runs, ~1.5 h.
+- **Results shape.** ETS falls with lead in all 132 region/model/threshold curves; it is lower at higher thresholds everywhere except Western Canada (flat or slightly higher in 9 lead/model cases). Whole-record GFS frequency bias is at or below 1 at 1 mm in all six headline regions at every lead (no light-rain over-forecast); the only clear over-forecasting is of 10 mm events in the Rockies (1.15–1.19 at every lead; 1.03 in the Alps at 24 h, otherwise ≤ 1.04).
+- **SWE.** GFS `WEASD:surface` (kg m⁻²) has the same units and field across 2021-03 … 2026-09 but no value over open water (53 % of Western Europe's weight, 62 % UK & Ireland). ERA5 `sd` is defined everywhere (0 over sea) except that glaciers carry a fixed 10 m (10,000 mm) placeholder, ~127 cells in western North America; those are masked as ERA5-undefined. Cells just under the placeholder (46 Western Canada cells in July 2025 hold 1–10 m) remain and dominate that region's error (Issue 018). Bias shows a seasonal cycle (e.g. Rockies 24 h: −55 mm in March, ~0 in July–September).
+- **Hand check.** European Alps, 2024-03, GFS, leads 24 and 240, thresholds 1/5/10, recomputed in plain numpy from the raw GFS `APCP` messages and raw ERA5 hourly fields: all weighted counts match the region file to ≤ 6e-16 relative, mean bias identical.
+- **Maps.** 124 files, 187 MB (92 existing files rewritten with identical values but slightly different bytes, plus 32 for tp24 and swe) — below the 300 MB mark, so all three thresholds are kept. New release `maps-20261011` must hold the full set.
+- Additions beyond spec (approved by the session prompt's defaults): `region_categorical.parquet`; ERA5 glacier-placeholder mask; CDS rejection handling; ECMWF worker limit; `mask` on the variable registry (`surface` for freezing level, `undefined` for snow).
 
 ---
 
@@ -568,6 +584,10 @@ Build steps:
 | 014 | Phase 10 | CDS reliability: single-level ERA5 requests queued for hours and some year-sized jobs failed with MARS errors; handled by year-sized batching, job-id attach on restart and a month fallback. Wall time for the Phase 10 run was dominated by CDS, not processing. | Noted for reference |
 | 015 | Phase 10 review | Freezing-level mask is one-sided: points are excluded only where ERA5 `deg0l == 0`. Where GFS reports 0 or a below-ground height but ERA5 does not, the point stays in, giving errors of order the terrain height. In the per-point aggregates (Jan 2024, 24h) mean bias grows with the masked fraction: NA −228 m at unmasked points vs −1,186 m at 50–90 % masked points (worst −2,400 m); Europe −194 vs −545 m. July (nothing masked) shows a uniform ~−150 m. The reported masked share counts ERA5 exclusions only. | Resolved in Phase 10b — symmetric mask against GFS `HGT:surface` and the GFS highest tropospheric freezing level. Per-point 24 h bias in the 50–90 % masked bin, Jan 2024: Europe −545 → −94 m, NA −1,186 → −50 m; bias no longer grows with masked fraction (Oct 2026) |
 | 016 | Phase 10b | In January North America the 24 h per-point bias drifts toward zero as the masked fraction grows (−158 m at 0 % to −14 m at >90 %): the sample that survives the symmetric mask at heavily masked points is selected on both sources' surface heights and is not unbiased. Europe is flat. | Noted for reference — not investigated |
+| 017 | Phase 11 | ECMWF open-data mirror (S3) returns 503 SlowDown under load; with 8 parallel requests a 7-step precipitation month lost 2 runs after all retries. | Mitigated — ECMWF fetches use 3 workers; the affected month was re-run complete |
+| 018 | Phase 11 | Snow water equivalent in glaciated western North America: ERA5 gives cells on glaciers 1–10 m of water equivalent (a fixed 10 m placeholder, masked, and values just below it), GFS tens to hundreds of mm. Western Canada 24 h RMSE is ~570 mm and bias −54 mm even in summer; the Rockies/Pacific Northwest are far less affected. | Noted — not masked further (the cells are defined values); read Western Canada SWE with this in mind |
+| 019 | Phase 11 | ERA5 hourly `tp` time-stamp convention (stamp = end of the accumulation hour) is taken from ECMWF documentation as understood and supported by, not proven by, a correlation check against IFS HRES (end-of-hour vs a further 1 h shift fit about equally). A 1 h error would move one of the 24 hours of each window. | Open — confirm against the ERA5 documentation |
+| 020 | Phase 11 | ECMWF snow water equivalent not verified: open data has `sd` only from 2025-11-20. | Parked |
 
 ---
 

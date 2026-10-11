@@ -110,7 +110,7 @@ def _acc(values_by_step: dict[int, float], n_init=2, present=None, steps=STEPS):
 
 def test_window_total_is_the_difference_and_lead_24_is_the_accumulation_itself():
     acc = _acc({24: 5.0, 48: 9.0, 72: 10.0, 96: 12.0, 120: 15.0, 216: 40.0, 240: 46.0})
-    tot, _ = window_totals(acc, LEADS, 24)
+    tot = window_totals(acc, LEADS, 24)
     assert list(tot.lead_time.values) == LEADS
     # 24: acc(24); 48: acc48-acc24; 72: acc72-acc48; 120: acc120-acc96; 240: acc240-acc216
     assert tot.isel(init_time=0, latitude=0, longitude=0).values.tolist() == [5.0, 4.0, 1.0, 3.0, 6.0]
@@ -120,7 +120,7 @@ def test_window_total_is_the_difference_and_lead_24_is_the_accumulation_itself()
 def test_window_total_needs_both_accumulations():
     present = np.ones((2, 7), bool)
     present[1, STEPS.index(96)] = False                            # run 2 lacks acc(96): no total at 120
-    tot, _ = window_totals(_acc(dict.fromkeys(STEPS, 1.0) | {48: 2.0}, present=present), LEADS, 24)
+    tot = window_totals(_acc(dict.fromkeys(STEPS, 1.0) | {48: 2.0}, present=present), LEADS, 24)
     assert tot["present"].values[1].tolist() == [True, True, True, False, True]
     assert np.isnan(tot.isel(init_time=1, lead_time=3).values).all()
 
@@ -129,7 +129,8 @@ def test_tiny_negative_differences_are_clipped_to_zero_and_counted():
     acc = _acc({24: 5.0, 48: 5.0, 72: 5.0, 96: 5.0, 120: 5.0, 216: 5.0, 240: 5.0})
     acc[0, STEPS.index(48), 0, 1] = 4.9                             # 0.1 mm below acc(24) at one point
     acc[1, STEPS.index(240), 1, 0] = 4.5                            # 0.5 mm below acc(216)
-    tot, n_clipped = window_totals(acc, LEADS, 24)
+    tot = window_totals(acc, LEADS, 24)
+    n_clipped = tot["n_clipped"]
     assert float(tot.isel(init_time=0, lead_time=1, latitude=0, longitude=1)) == 0.0
     assert float(tot.min()) == 0.0
     assert n_clipped.values.tolist() == [[0, 1, 0, 0, 0], [0, 0, 0, 0, 1]]

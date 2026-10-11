@@ -20,7 +20,7 @@ from src.processing.tables import (
 from src.utils import paths
 from src.utils.config import Bounds, load_config
 from src.viz.components import PRECIP_NOTE, TERRAIN_NOTE, VARIABLE_NOTES, terrain_note
-from tests.test_phase11 import LEADS, THRESHOLDS, _month
+from tests.test_phase11 import THRESHOLDS, _month
 
 APP = Path(__file__).resolve().parents[1] / "dashboard" / "app.py"
 CFG = load_config()
