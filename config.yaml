@@ -14,8 +14,8 @@ models:
       - {name: aws,  start: "2024-02-01", end: "2026-09-20"}
 
 model_versions:                 # vertical markers on time-based views
-  gfs:   [{name: "v13", date: "2016-05-11"}, {name: "v14", date: "2017-07-19"},
-          {name: "v15", date: "2019-06-12"}, {name: "v16", date: "2021-03-22"}]   # first run affected: 12z each
+  gfs:   [{name: "v12", date: "2015-01-14"}, {name: "v13", date: "2016-05-11"}, {name: "v14", date: "2017-07-19"},
+          {name: "v15", date: "2019-06-12"}, {name: "v16", date: "2021-03-22"}]   # first run affected: 12z each from v13 (v12: EMC gives the day only)
   ecmwf: [{name: "49r1", date: "2024-11-12"}, {name: "50r1", date: "2026-05-12"}]
 
 variables:

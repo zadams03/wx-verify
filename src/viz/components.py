@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 import pandas as pd
 import streamlit as st
 
@@ -379,3 +381,104 @@ def render_month_range_selector(months: list[str], key: str = "month_range") -> 
         label_visibility="collapsed",
     )
     return first, last
+
+
+# ---------------------------------------------------------------------------
+# Record gaps and the skill-through-time view (Phase 12)
+# ---------------------------------------------------------------------------
+
+SWE_RECORD_NOTE = ("Snow water equivalent is verified from 2021-03-23 only. Before then GFS's snow field over "
+                   "open water differs between model versions, so the long GFS record is not used for it.")
+
+
+def record_gaps(months: list[str]) -> list[tuple[str, str]]:
+    """(first, last) of each run of missing months between the first and last of ``months`` ('YYYY-MM')."""
+    if not months:
+        return []
+    have = set(months)
+    full = [str(p) for p in pd.period_range(min(months), max(months), freq="M")]
+    gaps, start = [], None
+    for i, m in enumerate(full):
+        if m not in have and start is None:
+            start = m
+        if m in have and start is not None:
+            gaps.append((start, full[i - 1]))
+            start = None
+    return gaps
+
+
+def gap_note(months: list[str], first: str, last: str, label: str) -> str | None:
+    """Caption for a window from ``first`` to ``last`` that crosses a gap in the record, else None."""
+    inside = [(a, b) for a, b in record_gaps(months) if first < a and b < last]
+    if not inside:
+        return None
+    gaps = "; ".join(f"{a} to {b}" for a, b in inside)
+    n = sum(first <= m <= last for m in months)
+    return (f"The {label} record has a gap: no data from {gaps}. This window holds {n} months with data; "
+            "the scores pool those months only.")
+
+
+def full_years(months: list[str]) -> list[int]:
+    """Years with all twelve months in ``months``."""
+    years = pd.Series([int(m[:4]) for m in months]).value_counts()
+    return sorted(int(y) for y, n in years.items() if n == 12)
+
+
+def versions_covering(versions: list, first: date, last: date) -> list:
+    """Model versions that produced forecasts from ``first`` to ``last``: the one in effect on ``first``
+    (the latest introduced on or before it) and every one introduced after it, up to ``last``."""
+    ordered = sorted(versions, key=lambda v: v.date)
+    before = [v for v in ordered if v.date <= first]
+    return before[-1:] + [v for v in ordered if first < v.date <= last]
+
+
+def versions_label(versions: list, first: date, last: date) -> str:
+    """'v12 → v13 (from 2016-05-11)' — what ``versions_covering`` lists, for a caption."""
+    cov = versions_covering(versions, first, last)
+    if not cov:
+        return "version not recorded"
+    head = [] if cov[0].date <= first else ["earlier version"]
+    parts = head + [cov[0].name if cov[0].date <= first else f"{cov[0].name} (from {cov[0].date})"]
+    parts += [f"{v.name} (from {v.date})" for v in cov[1:]]
+    return " → ".join(parts)
+
+
+VIEWS = {"Selected window": "window", "Skill through time": "time"}
+
+
+def render_view_selector(key: str = "view") -> str:
+    """'window' (scores pooled over a month range) or 'time' (two periods compared)."""
+    return VIEWS[st.radio("View", list(VIEWS), key=key, horizontal=True)]
+
+
+def default_periods(months: list[str]) -> tuple[int, int]:
+    """Earliest and latest full year; without two full years, the earliest and latest year with data."""
+    years = full_years(months)
+    if len(years) < 2:
+        years = sorted({int(m[:4]) for m in months})
+    return years[0], years[-1]
+
+
+def render_period_selector(months: list[str], key: str = "periods") -> tuple[int, int]:
+    """Two calendar years to compare (defaults: ``default_periods``). Years are offered only where the
+    data has months; part years are marked."""
+    years = sorted({int(m[:4]) for m in months})
+    complete = set(full_years(months))
+    fmt = lambda y: str(y) if y in complete else f"{y} (part year)"       # noqa: E731
+    a0, b0 = default_periods(months)
+    st.markdown("**Periods to compare**")
+    a = st.selectbox("Period 1", years, index=years.index(a0), format_func=fmt, key=f"{key}_a")
+    b = st.selectbox("Period 2", years, index=years.index(b0), format_func=fmt, key=f"{key}_b")
+    return a, b
+
+
+PERIOD_MAP_VIEWS = {"rmse_diff": "RMSE difference ({a} − {b})", "acc_diff": "ACC difference ({b} − {a})"}
+PRECIP_PERIOD_MAP_VIEWS = {"ets_diff": "ETS difference ({b} − {a})"}
+
+
+def render_period_map_toggle(a: int, b: int, has_acc: bool, precip: bool, key: str = "period_map") -> str:
+    """Difference map between the two periods: 'rmse_diff' / 'acc_diff', or 'ets_diff' for precipitation."""
+    views = PRECIP_PERIOD_MAP_VIEWS if precip else {k: v for k, v in PERIOD_MAP_VIEWS.items()
+                                                   if has_acc or k != "acc_diff"}
+    labels = {v.format(a=a, b=b): k for k, v in views.items()}
+    return labels[st.radio("Map view", list(labels), key=key)]

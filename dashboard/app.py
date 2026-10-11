@@ -32,21 +32,34 @@ from src.viz.components import (
     ERA5_LINEAGE_NOTE,
     PRECIP_COMPARISON_MAP_VIEWS,
     PRECIP_NOTE,
+    SWE_RECORD_NOTE,
     VARIABLE_NOTES,
     freezing_level_note,
+    gap_note,
     inject_card_styles,
+    record_gaps,
     render_comparison_map_toggle,
     render_lead_time_selector,
     render_map_toggle,
     render_map_view_toggle,
     render_metric_cards,
     render_month_range_selector,
+    render_period_map_toggle,
+    render_period_selector,
     render_precip_cards,
     render_threshold_selector,
+    render_view_selector,
     swe_note,
     terrain_note,
+    versions_label,
 )
-from src.viz.skill_curves import build_comparison_curves, build_precip_curves, build_skill_curves
+from src.viz.skill_curves import (
+    PERIOD_COLORS,
+    build_comparison_curves,
+    build_precip_curves,
+    build_skill_by_year,
+    build_skill_curves,
+)
 from src.viz.spatial_maps import build_spatial_map, zoom_bounds
 
 _ERA5T_WINDOW_DAYS = 100   # ERA5 is preliminary (ERA5T) for roughly the latest 3 months
@@ -217,8 +230,16 @@ with st.sidebar:
         st.divider()
         threshold = render_threshold_selector(cfg.variables[variable].thresholds, units=cfg.variables[variable].units)
 
+    months = sorted(source.loc[sel, "month"].unique())          # a comparison is limited to the common period
     st.divider()
-    if comparison and precip:
+    view_mode = render_view_selector()
+    if view_mode == "time":
+        period_a, period_b = render_period_selector(months, key=f"periods_{choice}_{variable}_{domain}")
+
+    st.divider()
+    if view_mode == "time":
+        map_view = render_period_map_toggle(period_a, period_b, has_acc, precip)
+    elif comparison and precip:
         map_view = render_comparison_map_toggle(*pair, key="cmp_map_metric_precip", views=PRECIP_COMPARISON_MAP_VIEWS)
     elif comparison:
         map_view = render_comparison_map_toggle(*pair)
@@ -227,26 +248,158 @@ with st.sidebar:
     else:
         map_view = render_map_toggle(has_acc=has_acc)
     full_domain = render_map_view_toggle()
-    st.divider()
 
-    months = sorted(source.loc[sel, "month"].unique())          # a comparison is limited to the common period
-    first_month, last_month = render_month_range_selector(
-        months, key=f"months_{choice}_{variable}_{domain}")
+    if view_mode == "window":
+        st.divider()
+        first_month, last_month = render_month_range_selector(
+            months, key=f"months_{choice}_{variable}_{domain}")
+        if record_gaps(months):
+            st.caption("Months without data are not offered: "
+                       + "; ".join(f"none from {a} to {b}" for a, b in record_gaps(months)) + ".")
+    else:
+        first_month, last_month = months[0], months[-1]
 
     st.divider()
     st.caption("v1.8.1 · October 2026")
 
 units = cfg.variables[variable].units
 long_name = cfg.variables[variable].long_name
+record_label = _model_label(comparison) + " paired" if comparison else model.upper()
 window = [m for m in months if first_month <= m <= last_month]
 win_start = date.fromisoformat(first_month + "-01")
 win_end = pd.Period(last_month, "M").end_time.date()
 
 
-def _cov(model_key: str, comp: str) -> pd.DataFrame:
+def _cov(model_key: str, comp: str, in_months: list[str] | None = None) -> pd.DataFrame:
     c = paired_coverage if comp else coverage
     return c[(c.comparison == comp) & (c.model == model_key) & (c.variable == variable)
-             & (c.domain == domain) & c.month.isin(window)]
+             & (c.domain == domain) & c.month.isin(window if in_months is None else in_months)]
+
+
+def _scores(m: str, in_months: list[str]) -> pd.DataFrame:
+    """One row per lead time for model ``m`` pooled over ``in_months``: bias, RMSE and ACC — or for
+    precipitation frequency bias, ETS and event frequency at the chosen threshold plus the mean bias."""
+    rows = source[(source.model == m) & (source.variable == variable) & (source.domain == domain)
+                  & (source.region == region_name) & source.month.isin(in_months)]
+    summary = region_metrics(rows)
+    if not precip:
+        return summary
+    cat_src = all_categorical[all_categorical.comparison == comparison]
+    cat = cat_src[(cat_src.model == m) & (cat_src.variable == variable) & (cat_src.domain == domain)
+                  & (cat_src.region == region_name) & cat_src.month.isin(in_months)
+                  & (cat_src.threshold == threshold)]
+    scores = categorical_metrics(cat).drop(columns="threshold")
+    return scores.merge(summary[["lead_time_h", "bias", "n_forecasts"]], on="lead_time_h")
+
+
+# ---------------------------------------------------------------------------
+# Skill through time — two calendar years side by side, and every year at one lead time
+# ---------------------------------------------------------------------------
+
+def _period_map(m: str, a: int, b: int):
+    """Difference map between years ``a`` and ``b`` for model ``m`` (None when a year has no map)."""
+    sa, sb = (_load_map_stats(m, variable, domain, (y,), comparison) for y in (a, b))
+    if sa is None or sb is None:
+        return None
+    if map_view == "ets_diff":
+        da = map_scores(sb, threshold)["ets"] - map_scores(sa, threshold)["ets"]
+        name, note = f"ETS {b} − {a} (≥ {threshold:g} {units}/24h)", f"+ = {b} more skilful"
+    elif map_view == "acc_diff":
+        da, name, note = map_metrics(sb)["acc"] - map_metrics(sa)["acc"], f"ACC {b} − {a}", f"+ = {b} higher"
+    else:
+        da, name, note = (map_metrics(sa)["rmse"] - map_metrics(sb)["rmse"], f"RMSE {a} − {b}",
+                          f"+ = {b} more accurate")
+    return build_spatial_map(da, map_view, lead_time_h, region_bounds, region_name, units, view,
+                             title=f"{m.upper()} {name}", colorbar_note=note, variable=variable)
+
+
+if view_mode == "time":
+    a, b = period_a, period_b
+    in_year = {y: [mo for mo in months if mo.startswith(f"{y}-")] for y in sorted({int(mo[:4]) for mo in months})}
+    st.title(f"wx-verify — {_model_label(choice)} {long_name}: skill through time")
+    st.caption(f"{_model_label(choice)} 0.25° | {long_name} | ERA5 verification | {region_name}"
+               + (" | paired runs only (the common period)" if comparison else " | full record"))
+    if a == b:
+        st.warning("Choose two different years to compare.", icon="⚠️")
+        st.stop()
+    for y in (a, b):
+        first, last = date.fromisoformat(in_year[y][0] + "-01"), pd.Period(in_year[y][-1], "M").end_time.date()
+        runs = {m: int(_cov(m, comparison, in_year[y]).n_runs_included.sum()) for m in shown}
+        st.caption(
+            f"**{y}** — {len(in_year[y])} months ({in_year[y][0]} to {in_year[y][-1]}), "
+            + ", ".join(f"{runs[m]:,} {m.upper()} runs" for m in shown) + " verified. Model versions: "
+            + "; ".join(f"{m.upper()} {versions_label(cfg.model_versions.get(m, []), first, last)}" for m in shown))
+    gaps = record_gaps(months)
+    if gaps:
+        st.info(f"The {record_label} record has a gap: "
+                + "; ".join(f"no data from {g0} to {g1}" for g0, g1 in gaps)
+                + ". Only years with data are offered, and the year-by-year chart draws no line across the gap.",
+                icon="ℹ️")
+    if comparison:
+        st.warning(ERA5_LINEAGE_NOTE, icon="⚠️")
+    if variable == "swe":
+        st.caption(SWE_RECORD_NOTE)
+    if cfg.is_mountain_region(domain, region_name) and terrain_note(variable):
+        st.info(terrain_note(variable), icon="⛰️")
+    lead_time_h = render_lead_time_selector(cfg.lead_times_hours)
+    st.markdown("---")
+
+    curves = {f"{m} {y}": _scores(m, in_year[y]) for m in shown for y in (a, b)}
+    colors = {f"{m} {y}": PERIOD_COLORS.get(m, ("#9a9a9a", "#4a4a4a"))[i] for m in shown for i, y in enumerate((a, b))}
+    title = f"{_model_label(choice)}: {a} vs {b} — {region_name}"
+    col_left, col_right = st.columns([3, 2], gap="medium")
+    with col_left:
+        if precip:
+            fig = build_precip_curves(curves, region_name, lead_times=cfg.lead_times_hours, units=units,
+                                      threshold=threshold, colors=colors, title=title)
+        else:
+            fig = build_comparison_curves(curves, region_name, lead_times=cfg.lead_times_hours, units=units,
+                                          has_acc=has_acc, colors=colors, title=title)
+        st.plotly_chart(fig, width="stretch")
+        if has_acc:
+            st.caption(CENTRED_ACC_NOTE)
+    with col_right:
+        d = cfg.domains[domain].bounds
+        view = ({"lat_min": d.lat_min, "lat_max": d.lat_max, "lon_min": d.lon_min, "lon_max": d.lon_max}
+                if full_domain else zoom_bounds(region_bounds))
+        map_model = (st.radio("Map model", list(pair), format_func=str.upper, horizontal=True, key="period_map_model")
+                     if comparison else model)
+        try:
+            map_fig = _period_map(map_model, a, b)
+        except MapUnavailable as exc:
+            st.warning(f"Map data could not be downloaded: {exc}", icon="⚠️")
+            map_fig = None
+        if map_fig is None:
+            st.info("Spatial map data not available for one of these years.")
+        else:
+            st.plotly_chart(map_fig, width="stretch")
+            st.caption(f"Each year's grid-point scores over all its forecasts, then differenced ({a} and {b}, "
+                       "0.25° cells)." + (" Part years cover different seasons, so their difference mixes in "
+                                          "the seasonal cycle." if min(len(in_year[a]), len(in_year[b])) < 12 else ""))
+
+    st.markdown("---")
+    panels = ([("ets", f"ETS (≥ {threshold:g} {units}/24h) at {lead_time_h}h", ".3f"),
+               ("freq_bias", f"Frequency bias at {lead_time_h}h", ".2f")] if precip else
+              [("rmse", f"RMSE ({units}) at {lead_time_h}h", ".2f")]
+              + ([("acc_c", f"ACC (centred) at {lead_time_h}h", ".3f")] if has_acc else [])
+              + [("bias", f"Bias ({units}) at {lead_time_h}h", "+.2f")])
+    yearly = {}
+    for m in shown:
+        recs = []
+        for y, ms in in_year.items():
+            row = _scores(m, ms).set_index("lead_time_h").reindex([lead_time_h]).iloc[0]
+            recs.append({"year": y, "n_months": len(ms), **{c: float(row[c]) for c, _, _ in panels}})
+        yearly[m] = pd.DataFrame(recs)
+    versions = [v for m in shown for v in cfg.model_versions.get(m, [])]
+    if comparison:
+        versions = [type(v)(f"{m.upper()} {v.name}", v.date) for m in shown for v in cfg.model_versions.get(m, [])]
+    st.plotly_chart(build_skill_by_year(yearly, panels, versions, gaps, title=f"Year by year — {region_name}"),
+                    width="stretch")
+    st.caption("One point per calendar year; hollow markers are part years (fewer than 12 months, so a "
+               "different mix of seasons). Dotted lines mark model upgrades. A change in skill that lines up "
+               "with an upgrade may reflect the model change, but this view does not test that — weather "
+               "varies from year to year, and ERA5 itself is not perfect truth.")
+    st.stop()
 
 
 # ---------------------------------------------------------------------------
@@ -279,6 +432,10 @@ else:
         f"({ex_fc:,} missing forecast data, {ex_era5:,} missing ERA5 at a valid time)."
     )
 
+if view_mode == "window" and gap_note(months, first_month, last_month, record_label):
+    st.info(gap_note(months, first_month, last_month, record_label), icon="ℹ️")
+if variable == "swe":
+    st.caption(SWE_RECORD_NOTE)
 if cfg.is_mountain_region(domain, region_name) and terrain_note(variable):
     st.info(terrain_note(variable), icon="⛰️")
 
@@ -301,23 +458,7 @@ else:
 # Metrics for the selected window
 # ---------------------------------------------------------------------------
 
-def _precip_summary(m: str) -> pd.DataFrame:
-    """Frequency bias, ETS and event frequency at the chosen threshold (counts pooled over the window),
-    with the mean bias from the region table. One row per lead time."""
-    cat_src = all_categorical[all_categorical.comparison == comparison]
-    cat = cat_src[(cat_src.model == m) & (cat_src.variable == variable) & (cat_src.domain == domain)
-                  & (cat_src.region == region_name) & cat_src.month.isin(window) & (cat_src.threshold == threshold)]
-    scores = categorical_metrics(cat).drop(columns="threshold")
-    return scores.merge(summaries[m][["lead_time_h", "bias", "n_forecasts"]], on="lead_time_h")
-
-
-summaries = {}
-for m in shown:
-    m_rows = source[(source.model == m) & (source.variable == variable) & (source.domain == domain)
-                    & (source.region == region_name) & source.month.isin(window)]
-    summaries[m] = region_metrics(m_rows)
-if precip:
-    summaries = {m: _precip_summary(m) for m in shown}
+summaries = {m: _scores(m, window) for m in shown}
 
 if variable == "frzl":
     window_rows = source[(source.model == model) & (source.variable == variable) & (source.domain == domain)

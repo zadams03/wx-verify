@@ -41,7 +41,7 @@ def test_repo_config_loads():
     assert [(s.name, s.start, s.end) for s in cfg.models["gfs"].active_sources()] == [
         ("aws", date(2021, 3, 23), date(2026, 9, 20)), ("ncar", date(2015, 1, 15), date(2021, 3, 22))]
     assert [(v.name, v.date) for v in cfg.model_versions["gfs"]] == [
-        ("v13", date(2016, 5, 11)), ("v14", date(2017, 7, 19)), ("v15", date(2019, 6, 12)), ("v16", date(2021, 3, 22))]
+        ("v12", date(2015, 1, 14)), ("v13", date(2016, 5, 11)), ("v14", date(2017, 7, 19)), ("v15", date(2019, 6, 12)), ("v16", date(2021, 3, 22))]
     assert cfg.variables["swe"].start == date(2021, 3, 23) and cfg.variables["t2m"].start is None
     assert cfg.models["gfs"].end == date(2026, 9, 20)
     assert cfg.models["ecmwf"].start == date(2024, 2, 1)
