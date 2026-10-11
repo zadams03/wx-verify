@@ -17,6 +17,8 @@ from src.data.registry import get_variable
 from src.utils.config import Bounds, load_config
 from tests.test_pipeline import root  # noqa: F401  (fixture)
 
+_real_listed = ncar.listed_files
+
 CFG = load_config()
 LEADS = [24, 48, 72, 120, 240]
 BOX = Bounds(lat_min=50.0, lat_max=50.5, lon_min=-0.25, lon_max=0.25)      # 3 x 3 cells across 0°E
@@ -101,6 +103,28 @@ def test_decode_refuses_a_response_that_is_not_the_field_asked_for(kw, match):
                     lon0=args["lon0"], ref=args["ref"])
     with pytest.raises(ncar.ResponseMismatch, match=match):
         ncar.decode_ncss(content, T2M, BOX, INIT16, 24)
+
+
+@pytest.fixture(autouse=True)
+def _every_file_listed(monkeypatch):
+    monkeypatch.setattr(ncar, "listed_files", lambda session, d: None)
+
+
+def test_a_file_the_archive_does_not_list_is_missing_without_retries(monkeypatch):
+    monkeypatch.setattr(ncar, "listed_files", lambda session, d: frozenset({"gfs.0p25.2021030812.f216.grib2"}))
+    monkeypatch.setattr(ncar, "get", lambda *a, **k: pytest.fail("requested a file the catalog does not list"))
+    with pytest.raises(ncar.NotInArchive):
+        ncar.fetch_field(None, date(2021, 3, 8), 12, 240, T2M, BOX)
+
+
+def test_the_day_catalog_is_read_once_and_parsed(monkeypatch):
+    calls = []
+    xml = '<dataset name="gfs.0p25.2016011500.f024.grib2" /><dataset name="gfs.0p25.2016011512.f240.grib2" />'
+    monkeypatch.setattr(ncar, "get", lambda s, url, timeout=0: calls.append(url) or type("R", (), {"text": xml}))
+    monkeypatch.setattr(ncar, "_LISTED", {})
+    for _ in range(3):
+        names = _real_listed(None, date(2016, 1, 15))
+    assert names == {"gfs.0p25.2016011500.f024.grib2", "gfs.0p25.2016011512.f240.grib2"} and len(calls) == 1
 
 
 def test_a_wrong_response_is_requested_again(monkeypatch):

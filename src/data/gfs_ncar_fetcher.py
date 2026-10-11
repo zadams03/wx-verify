@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import io
 import re
+import threading
 import time
 from datetime import date, datetime
 
@@ -24,6 +25,7 @@ from src.data.byterange import TransientFetchError, get
 from src.data.registry import GFSField
 
 _NCSS_BASE = "https://tds.gdex.ucar.edu/thredds/ncss/grid/files/g/d084001"
+_CATALOG = "https://tds.gdex.ucar.edu/thredds/catalog/files/g/d084001/{d:%Y}/{d:%Y%m%d}/catalog.xml"
 CONTINUOUS_APCP_FROM = datetime(2019, 6, 12, 12)    # GFS v15.1: first run with the 0→N accumulation
 BUCKET_H = 6
 WORKERS = 4            # parallel NCSS requests per process (the server, not the client, sets the pace)
@@ -58,6 +60,30 @@ class ResponseMismatch(TransientFetchError):
     Treated as transient — the field is requested again."""
 
 
+class NotInArchive(FileNotFoundError):
+    """The archive does not list this run/step at all (10 of 4,518 runs lack a needed file) — not retried."""
+
+
+_LISTED: dict[date, frozenset[str] | None] = {}
+_LISTED_LOCK = threading.Lock()
+
+
+def listed_files(session: requests.Session, init_date: date) -> frozenset[str] | None:
+    """File names the archive lists for one day (its THREDDS catalog, fetched once per day and kept);
+    None if the catalog cannot be read, in which case nothing is assumed missing."""
+    with _LISTED_LOCK:
+        if init_date in _LISTED:
+            return _LISTED[init_date]
+    try:
+        text = get(session, _CATALOG.format(d=init_date), timeout=120).text
+        names = frozenset(re.findall(r'name="(gfs\.0p25\.\d{10}\.f\d{3}\.grib2)"', text))
+    except TransientFetchError:
+        names = None
+    with _LISTED_LOCK:
+        _LISTED[init_date] = names or None
+    return names or None
+
+
 MISMATCH_ATTEMPTS = 5
 _MISMATCH_BACKOFF_S = 5.0
 
@@ -78,6 +104,9 @@ def fetch_field(session: requests.Session, init_date: date, run_hour: int, step_
     field asked for. Raises ResponseMismatch (transient) if every attempt is wrong. Thread-safe: netCDF-3
     is read by scipy, in pure Python."""
     init = datetime(init_date.year, init_date.month, init_date.day, run_hour)
+    names = listed_files(session, init_date)
+    if names is not None and f"gfs.0p25.{init:%Y%m%d%H}.f{step_h:03d}.grib2" not in names:
+        raise NotInArchive(f"gfs.0p25.{init:%Y%m%d%H}.f{step_h:03d}.grib2 is not in the d084001 archive")
     last: Exception | None = None
     for attempt in range(MISMATCH_ATTEMPTS):
         try:
