@@ -83,6 +83,7 @@ class GFSFetcher(ByteRangeFetcher):
     model = "gfs"
     label = "GFS"
     _SOURCES = ("aws", "ncar")
+    alone = False          # NCAR: make every request with no other in flight (scripts/verify_raw.py)
 
     def _active(self):
         sources = [s for s in self.config.models["gfs"].active_sources() if s.name in self._SOURCES]
@@ -119,10 +120,12 @@ class GFSFetcher(ByteRangeFetcher):
             # The window ending at lead h: the four 6-hour buckets ending at h-18, h-12, h-6 and h.
             f = field.field
             steps = range(h - field.window_h + ncar.BUCKET_H, h + 1, ncar.BUCKET_H)
-            return [(ncar.fetch_field(session, d, r, s, f, bounds, bucket=True, valid=_NCSS_RANGES[f.ncss]), None)
+            return [(ncar.fetch_field(session, d, r, s, f, bounds, bucket=True, valid=_NCSS_RANGES[f.ncss],
+                                     alone=self.alone), None)
                     for s in steps]
         parts = field.parts if hasattr(field, "parts") else (field,)
-        return [(ncar.fetch_field(session, d, r, h, f, bounds, valid=_NCSS_RANGES[f.ncss]), None) for f in parts]
+        return [(ncar.fetch_field(session, d, r, h, f, bounds, valid=_NCSS_RANGES[f.ncss], alone=self.alone), None)
+                for f in parts]
 
     def fetch_month(self, variable: str, domain: str, year: int, month: int, init_dates=None) -> Path:
         before = ncar.DUPLICATE_STATS.copy()

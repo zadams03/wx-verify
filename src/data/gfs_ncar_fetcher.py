@@ -117,7 +117,9 @@ def duplicate_selected(url: str) -> bool:
 
 
 def _lock_dir():
-    return paths.DATA_ROOT / "raw" / "gfs"
+    """Fixed, not under the redirectable DATA_ROOT: every process on the machine must share the locks
+    (scripts/verify_raw.py fetches into a scratch DATA_ROOT while the backfill runs)."""
+    return paths.REPO_ROOT / "data" / "raw" / "gfs"
 
 
 @contextmanager
@@ -178,9 +180,11 @@ def _identical(a: xr.DataArray, b: xr.DataArray) -> bool:
 
 
 def fetch_field(session: requests.Session, init_date: date, run_hour: int, step_h: int, field: GFSField,
-                bounds, bucket: bool = False, valid: tuple[float, float] | None = None) -> xr.DataArray:
+                bounds, bucket: bool = False, valid: tuple[float, float] | None = None,
+                alone: bool = False) -> xr.DataArray:
     """Download and verify one field (``decode_ncss``, then ``valid`` — the plausible range in the field's
-    units), requesting it again when the response is not the field asked for. For a seeded ~2 % of fields
+    units), requesting it again when the response is not the field asked for; ``alone``: with no other
+    request in flight (as the duplicate copies always are). For a seeded ~2 % of fields
     (``duplicate_selected``) a second copy is then fetched alone and must be identical; if it differs,
     copies are fetched until two in a row agree (logged). Raises ResponseMismatch (transient) if every
     attempt is wrong. Thread-safe: netCDF-3 is read by scipy, in pure Python."""
@@ -189,7 +193,7 @@ def fetch_field(session: requests.Session, init_date: date, run_hour: int, step_
     if names is not None and f"gfs.0p25.{init:%Y%m%d%H}.f{step_h:03d}.grib2" not in names:
         raise NotInArchive(f"gfs.0p25.{init:%Y%m%d%H}.f{step_h:03d}.grib2 is not in the d084001 archive")
     args = (session, init_date, run_hour, step_h, field, bounds, bucket, valid)
-    prev = _fetch_verified(*args, alone=False)
+    prev = _fetch_verified(*args, alone=alone)
     url = ncss_url(init_date, run_hour, step_h, field, bounds, bucket)
     if not duplicate_selected(url):
         return prev

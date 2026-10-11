@@ -435,3 +435,25 @@ def test_live_decode_of_every_variable(key):
             assert da.shape == (105, 153)
             v = f.conversion.apply(da.values[np.isfinite(da.values)].astype("float64"))
             assert v.size and lo <= v.min() and v.max() <= hi, (key, f.idx_name, d)
+
+
+def test_the_verify_pass_patches_a_stored_field_that_a_second_copy_contradicts(root, box_cfg, monkeypatch):  # noqa: F811
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("verify_raw", pipeline.paths.REPO_ROOT / "scripts" / "verify_raw.py")
+    verify_raw = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(verify_raw)
+    monkeypatch.setattr(ncar, "download_field", _fake_ncss())
+    f = GFSFetcher(box_cfg)
+    path = f.fetch_month("t2m", "europe", 2016, 1, init_dates=[date(2016, 1, 15)])
+    with xr.open_dataset(path) as ds:
+        bad = ds.load()
+    bad["data"].values[1, 2] += 30.0                      # 12z +72h holds another field's values
+    bad.to_netcdf(path.with_suffix(".tmp"))
+    path.with_suffix(".tmp").replace(path)
+    got = verify_raw.verify_month(box_cfg, "t2m", "europe", 2016, 1)
+    assert got["fields"] == 10 and got["differ"] == 1 and got["stored_wrong"] == 1 and got["second_wrong"] == 0
+    assert got["patched"] == ["2016-01-15 12z +72h (max |diff| 30)"]
+    with xr.open_dataset(path) as ds:
+        assert np.allclose(ds["data"].values, 280.0) and ds.attrs["verified_second_copy"] == 1
+    assert path.with_suffix(".nc.unverified").exists()
+    assert verify_raw.verify_month(box_cfg, "t2m", "europe", 2016, 1)["differ"] == 0
