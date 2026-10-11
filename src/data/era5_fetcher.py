@@ -31,6 +31,8 @@ _CLIM_PRODUCT = "monthly_averaged_reanalysis_by_hour_of_day"
 MAX_CDS_REQUESTS = 8
 _MAX_ATTEMPTS = 3
 _BACKOFF_S = 30.0
+REJECTED_WAIT_S = 180.0     # CDS refuses new jobs while too many of ours are queued ("rejected"): wait, resubmit
+MAX_REJECTIONS = 400
 YEAR_JOB_FAILURES = 2       # a year-sized request that fails this often is split into months
 MONTH_JOB_FAILURES = 3
 
@@ -129,6 +131,20 @@ class ERA5Fetcher(BaseFetcher):
         except Exception as exc:                                  # pragma: no cover - diagnostics only
             return f"(no failure text: {exc})"
 
+    @staticmethod
+    def _wait_after_rejection(reg: Path, state: dict, out: Path, rejections: int) -> int:
+        """A job CDS rejected (too many queued requests): forget it and wait before submitting again.
+        Not a failure of the request itself, so it does not count towards JobFailed."""
+        rejections += 1
+        if rejections > MAX_REJECTIONS:
+            raise RuntimeError(f"CDS kept rejecting the request for {out.name}")
+        state.pop("job_id", None)
+        reg.write_text(json.dumps(state))
+        logger.warning("CDS rejected the job for %s (queue limit) — resubmitting in %.0fs (%d)",
+                       out.name, REJECTED_WAIT_S, rejections)
+        time.sleep(REJECTED_WAIT_S)
+        return rejections
+
     def _retrieve(self, dataset: str, request: dict, out: Path, max_job_failures: int | None = None) -> None:
         """Download one request to ``out``.
 
@@ -142,7 +158,7 @@ class ERA5Fetcher(BaseFetcher):
         reg = self._job_file(out, dataset, request)
         reg.parent.mkdir(parents=True, exist_ok=True)
         client = cdsapi.Client(progress=False)
-        net_failures = 0
+        net_failures = rejections = 0
         while True:
             state = json.loads(reg.read_text()) if reg.exists() else {}
             remote = None
@@ -152,6 +168,9 @@ class ERA5Fetcher(BaseFetcher):
                     status = remote.status
                 except Exception:
                     remote, status = None, "unknown"
+                if status == "rejected":
+                    rejections = self._wait_after_rejection(reg, state, out, rejections)
+                    continue
                 if status == "failed":
                     state["failures"] = state.get("failures", 0) + 1
                     remote = None
@@ -177,6 +196,9 @@ class ERA5Fetcher(BaseFetcher):
                 return
             except Exception as exc:
                 part.unlink(missing_ok=True)
+                if remote.status == "rejected":
+                    rejections = self._wait_after_rejection(reg, state, out, rejections)
+                    continue
                 if remote.status == "failed":
                     text = self._failure_text(client, remote)
                     state["failures"] = state.get("failures", 0) + 1
