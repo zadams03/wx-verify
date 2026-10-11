@@ -234,7 +234,7 @@ with st.sidebar:
         months, key=f"months_{choice}_{variable}_{domain}")
 
     st.divider()
-    st.caption("v1.8 · October 2026")
+    st.caption("v1.8.1 · October 2026")
 
 units = cfg.variables[variable].units
 long_name = cfg.variables[variable].long_name

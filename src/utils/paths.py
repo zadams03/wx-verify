@@ -28,6 +28,11 @@ def pairing_path(comparison: str, variable: str, domain: str, month: str) -> Pat
             / variable / domain / f"{month}.json")
 
 
+def static_mask_path(name: str, domain: str) -> Path:
+    """Committed static mask of a domain's ERA5 grid (data/static/{name}_{domain}.nc)."""
+    return DATA_ROOT / "static" / f"{name}_{domain}.nc"
+
+
 def climatology_path(variable: str, domain: str) -> Path:
     return DATA_ROOT / "processed" / "climatology" / f"{variable}_{domain}.nc"
 

@@ -130,6 +130,24 @@ class AccumulationField:
 
 ERA5_GLACIER_SWE_MM = 10000.0   # ERA5 snow depth on glaciers is a fixed 10 m of water equivalent (seen in the data)
 
+
+@dataclass(frozen=True)
+class PermanentSnowMask:
+    """ERA5 cells whose snow never melts out: the Aug–Sep minimum of ERA5 snow depth is at least
+    ``min_mm`` of water in every year of ``years`` (SPEC 3.1, v1.8.1). On these cells ERA5 holds
+    1–10 m of water equivalent (glaciers), so they are left out of the snow verification sample.
+
+    Built once from daily 00 UTC fields by scripts/build_permanent_snow_mask.py and stored per
+    domain in data/static/; the definition does not depend on the verification period."""
+
+    name: str = "era5_permanent_snow"
+    min_mm: float = 10.0
+    months: tuple[int, ...] = (8, 9)
+    years: tuple[int, int] = (2015, 2026)
+
+
+PERMANENT_SNOW = PermanentSnowMask()
+
 GRAVITY = 9.80665     # m s⁻², converts ERA5 geopotential (m² s⁻²) to metres
 
 
@@ -141,7 +159,7 @@ class ERA5Field:
     derive: None (first field, converted) | "speed" (√(u²+v²) of the two fields) |
     "freezing_level" (deg0l, height above ground, plus orography z/g → metres above
     sea level; NaN where deg0l == 0, i.e. the 0°C level is at the surface) | "snow" (sd in mm of water;
-    NaN where it equals the 10 m glacier placeholder ERA5 uses, ~127 cells in western North America).
+    NaN where it equals the 10 m glacier placeholder ERA5 uses, ~25 cells in western North America).
     climatology: "monthly" (CDS monthly-means-by-hour product), "hourly" (computed from
     hourly fields, 1991–2020) or None (no anomalies needed — variable has no ACC).
     """
@@ -156,6 +174,8 @@ class ERA5Field:
     # is the total of the ``accumulation_h`` hourly values ending at each valid time (ERA5 stamps
     # an accumulation with the end of its hour).
     accumulation_h: int | None = None
+    # Static cells where ERA5 is treated as undefined (NaN) for this variable.
+    static_mask: PermanentSnowMask | None = None
 
     @property
     def short_name(self) -> str:
@@ -271,7 +291,9 @@ VARIABLES: dict[str, VariableSpec] = {
         # GFS WEASD (kg m⁻² = mm) is missing over open water; ERA5 `sd` (m of water equivalent) is defined
         # everywhere (0 over sea). ECMWF open data has `sd` only from 2025-11-20, so ECMWF is parked.
         gfs=GFSField("WEASD", "surface", {"typeOfLevel": "surface"}, "sdwe"),
-        era5=ERA5Field(("snow_depth",), ("sd",), conversion=_M_TO_MM, climatology=None, derive="snow"),
+        # ERA5 is also undefined on its permanent-snow (glacier) cells, which hold 1–10 m of water all year.
+        era5=ERA5Field(("snow_depth",), ("sd",), conversion=_M_TO_MM, climatology=None, derive="snow",
+                       static_mask=PERMANENT_SNOW),
         mask="undefined",
     ),
     "tp24": VariableSpec(

@@ -17,7 +17,7 @@ import xarray as xr
 
 from src.data.accumulation import hourly_window_sums
 from src.data.base_fetcher import BaseFetcher
-from src.data.registry import ERA5_GLACIER_SWE_MM, GRAVITY, ERA5Field, get_variable
+from src.data.registry import ERA5_GLACIER_SWE_MM, GRAVITY, ERA5Field, PermanentSnowMask, get_variable
 from src.utils import paths
 
 logger = logging.getLogger(__name__)
@@ -84,6 +84,36 @@ def derive(ds: xr.Dataset, field: ERA5Field) -> xr.DataArray:
     if field.derive == "snow":
         return mm.where(mm < ERA5_GLACIER_SWE_MM - 0.5)
     return mm
+
+
+def permanent_snow_cells(sd_mm: xr.DataArray, mask: PermanentSnowMask) -> xr.DataArray:
+    """Boolean (latitude, longitude): cells whose ERA5 snow (mm of water, (valid_time, lat, lon)) stays at
+    or above ``mask.min_mm`` in every field of ``mask.months``, in every year of ``mask.years``."""
+    t = pd.DatetimeIndex(sd_mm.valid_time.values)
+    y0, y1 = mask.years
+    wanted = set(range(y0, y1 + 1))
+    if set(t.year) != wanted or not set(t.month) <= set(mask.months):
+        raise ValueError(f"snow depth covers years {sorted(set(t.year))}, months {sorted(set(t.month))}; "
+                         f"need every year {y0}-{y1} and only months {mask.months}")
+    yearly_min = sd_mm.groupby("valid_time.year").min()
+    return (yearly_min >= mask.min_mm).all("year")
+
+
+def load_static_mask(mask: PermanentSnowMask, domain: str) -> xr.DataArray:
+    """The stored boolean mask of a domain (True = left out of the sample)."""
+    path = paths.static_mask_path(mask.name, domain)
+    if not path.exists():
+        raise FileNotFoundError(f"{path} is missing — build it with scripts/build_permanent_snow_mask.py")
+    with xr.open_dataset(path) as ds:
+        return ds["mask"].load().astype(bool)
+
+
+def _apply_static_mask(da: xr.DataArray, mask: PermanentSnowMask, domain: str) -> xr.DataArray:
+    m = load_static_mask(mask, domain)
+    if not (np.array_equal(m.latitude.values, da.latitude.values)
+            and np.array_equal(m.longitude.values, da.longitude.values)):
+        raise ValueError(f"{mask.name} grid differs from the ERA5 grid of {domain}")
+    return da.where(~m)
 
 
 def _month_sums(da: xr.DataArray) -> xr.Dataset:
@@ -542,11 +572,15 @@ class ERA5Fetcher(BaseFetcher):
     def load(self, path: Path, variable: str) -> xr.DataArray:
         """Return ERA5 as DataArray(time, latitude, longitude) in display units.
 
-        The freezing level is NaN where the 0°C level is at the surface. An accumulated variable
-        (precipitation) is returned as the hourly values; see load_truth for window totals."""
+        The freezing level is NaN where the 0°C level is at the surface; snow is NaN on the static
+        permanent-snow cells of the file's domain (its raw directory, data/raw/era5/{domain}/). An
+        accumulated variable (precipitation) is returned as the hourly values; see load_truth for
+        window totals."""
         field = get_variable(variable).source_field("era5")
         with xr.open_dataset(path) as ds:
             da = derive(ds.load(), field)
+        if field.static_mask is not None:
+            da = _apply_static_mask(da, field.static_mask, path.parent.name)
         da = da.rename({"valid_time": "time"})
         da = da.drop_vars([c for c in da.coords if c not in ("time", "latitude", "longitude")])
         da = da.astype("float32")

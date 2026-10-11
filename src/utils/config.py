@@ -383,8 +383,10 @@ def _parse_dashboard(value: Any) -> DashboardConfig:
     if res <= 0 or budget <= 0:
         raise ConfigError("dashboard.map_resolution and committed_size_budget_mb must be positive")
     tag, repo = str(m["maps_release_tag"]), str(m["maps_repo"])
-    if not re.fullmatch(r"maps-\d{8}", tag):
-        raise ConfigError(f"dashboard.maps_release_tag must look like maps-YYYYMMDD, got {tag!r}")
+    # A letter suffix (maps-20261011b) is a second release on the same day: an existing tag is never
+    # overwritten, because the deployed manifest still names its files.
+    if not re.fullmatch(r"maps-\d{8}[a-z]?", tag):
+        raise ConfigError(f"dashboard.maps_release_tag must look like maps-YYYYMMDD[a-z], got {tag!r}")
     if not re.fullmatch(r"[\w.-]+/[\w.-]+", repo):
         raise ConfigError(f"dashboard.maps_repo must be owner/name, got {repo!r}")
     return DashboardConfig(map_resolution=res, committed_size_budget_mb=budget,

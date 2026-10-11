@@ -176,4 +176,4 @@ def test_mountain_regions_get_the_precipitation_caveat(precip_data):
 
 def test_version_caption_says_v1_8(precip_data):
     at = _app()
-    assert "v1.8 · October 2026" in [c.value for c in at.sidebar.caption]
+    assert "v1.8.1 · October 2026" in [c.value for c in at.sidebar.caption]

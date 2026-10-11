@@ -134,6 +134,65 @@ def aggregate_month(
                           categorical=cat_df)
 
 
+def mask_aggregate(agg: MonthAggregate, mask: xr.DataArray, regions: dict[str, Bounds]) -> MonthAggregate:
+    """Leave the cells of a static ERA5 mask out of an existing aggregate of a masked variable, without
+    the raw data: what ``aggregate_month`` gives when ERA5 is NaN on those cells (v1.8.1 snow mask).
+
+    At a masked cell every verified forecast (``n``) becomes an ERA5-only exclusion: its sums leave the
+    grid statistics and its weight moves from ``sum_w`` to ``sum_w_era5_only`` in the region rows.
+    Forecasts already excluded there keep their side of the split, which is only exact if the cell has
+    none (``n_masked`` 0) or no verified ones (``n`` 0) — otherwise a fresh run would count some of
+    them as excluded by both sources, so such a cell is an error. Region rows without ACC (no
+    climatology) only.
+    """
+    if not agg.masked:
+        raise ValueError("mask_aggregate needs a masked variable (exclusion columns)")
+    s = agg.stats
+    if not (np.array_equal(mask.latitude.values, s.latitude.values)
+            and np.array_equal(mask.longitude.values, s.longitude.values)):
+        raise ValueError("mask grid differs from the aggregate grid")
+    m = mask.astype(bool)
+    mixed = m & (s["n"] > 0) & (s["n_masked"] > 0)
+    if bool(mixed.any()):
+        raise ValueError(f"{int(mixed.sum())} masked cell/lead values have both verified and excluded forecasts")
+    if (agg.regions[["acc_count", "acc_c_count"]] != 0).any().any():
+        raise ValueError("mask_aggregate cannot correct spatial ACC")
+    stats = s.copy()
+    stats["n_masked"] = s["n_masked"] + s["n"].where(m, 0.0)
+    for v in STAT_VARS:
+        stats[v] = s[v].where(~m, 0.0)
+    rows = agg.regions.copy()
+    for name, bounds in regions.items():
+        w = region_weights(s.latitude, s.longitude, bounds).where(m, 0.0)
+        for lead in s.lead_time.values:
+            p = s.sel(lead_time=lead)
+            sel = (rows["region"] == name) & (rows["lead_time_h"] == int(lead))
+            if sel.sum() != 1:
+                raise ValueError(f"expected one region row for {name} {lead}h")
+            removed = float((w * p["n"]).sum())
+            rows.loc[sel, "sum_w"] -= removed
+            rows.loc[sel, "sum_w_era5_only"] += removed
+            rows.loc[sel, "sum_we"] -= float((w * p["sum_e"]).sum())
+            rows.loc[sel, "sum_we2"] -= float((w * p["sum_e2"]).sum())
+            if float(rows.loc[sel, "sum_w"].iloc[0]) <= 0 < int(rows.loc[sel, "n_forecasts"].iloc[0]):
+                raise ValueError(f"the mask removes every verified point of {name}; n_forecasts would change")
+    return MonthAggregate(stats=stats, regions=rows, counts=agg.counts, runs=agg.runs, masked=True,
+                          categorical=agg.categorical)
+
+
+def read_aggregate(model: str, variable: str, domain: str, month: str) -> MonthAggregate:
+    """Re-read a written (standalone) monthly aggregate."""
+    nc, pq = month_paths(model, variable, domain, month)
+    with xr.open_dataset(nc) as ds:
+        stats = ds.load()
+    counts = {k: int(stats.attrs[k]) for k in stats.attrs if k.startswith("n_")}
+    stats.attrs = {}
+    cp = categorical_path(model, variable, domain, month)
+    return MonthAggregate(stats=stats, regions=pd.read_parquet(pq), counts=counts,
+                          runs=pd.read_parquet(runs_path(model, variable, domain, month)),
+                          masked="n_masked" in stats, categorical=pd.read_parquet(cp) if cp.exists() else None)
+
+
 def validate_aggregate(agg: MonthAggregate, tol: float = 1e-9) -> None:
     """Raise ValueError if the aggregate is internally inconsistent."""
     c, s = agg.counts, agg.stats

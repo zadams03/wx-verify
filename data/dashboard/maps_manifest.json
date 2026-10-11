@@ -1,7 +1,7 @@
 {
- "release_tag": "maps-20261011",
+ "release_tag": "maps-20261011b",
  "repo": "zadams03/wx-verify",
- "total_bytes": 187071464,
+ "total_bytes": 187057422,
  "files": [
   {
    "path": "compare/gfs_vs_ecmwf/gfs/msl/europe/2024.nc",
@@ -426,38 +426,38 @@
   {
    "path": "gfs/swe/north_america_west/2021.nc",
    "asset": "gfs__swe__north_america_west__2021.nc",
-   "bytes": 429446,
-   "sha256": "798379d16a6ef13ec1cc30d2890ea11bcd5d19c5b0382dde53e5f8c6fa20c37b"
+   "bytes": 426824,
+   "sha256": "245436eabdaad229a0931109220948e30dfde35610c4de4b0603d976e12d35a4"
   },
   {
    "path": "gfs/swe/north_america_west/2022.nc",
    "asset": "gfs__swe__north_america_west__2022.nc",
-   "bytes": 423154,
-   "sha256": "0df759b6cc61c42e7dc0701ffa7054b2fc3f91ebcd1404f36164b5039b649244"
+   "bytes": 420806,
+   "sha256": "c2c2831dbccb96b6c6edb980c5342e77cc6d0d868946cfc87562576f47682018"
   },
   {
    "path": "gfs/swe/north_america_west/2023.nc",
    "asset": "gfs__swe__north_america_west__2023.nc",
-   "bytes": 431425,
-   "sha256": "25b871a7742dbfbe97b65568cb09d7e6998aa804ca953dc4dc0cbdc64a644636"
+   "bytes": 429363,
+   "sha256": "e766bd81de8410082d8f86246c68124dbcd8a14ee5b6df10e1110dd275a0a774"
   },
   {
    "path": "gfs/swe/north_america_west/2024.nc",
    "asset": "gfs__swe__north_america_west__2024.nc",
-   "bytes": 431070,
-   "sha256": "4e6d6bdd4a0cab1afd1e7a7930f279ca1bfb4237c8965f8d0f8cadb31f653542"
+   "bytes": 428761,
+   "sha256": "c0b6343f0e57c22d1a0a576d847c0f07162ab9b6738b3b9733fb1a2cc4fe81d8"
   },
   {
    "path": "gfs/swe/north_america_west/2025.nc",
    "asset": "gfs__swe__north_america_west__2025.nc",
-   "bytes": 432870,
-   "sha256": "352ef9ae982e9286dbb08de47974c6cb2b3fe3a43567d02184eac49a1c788cdc"
+   "bytes": 430489,
+   "sha256": "40ffa4682a0893c0532e7240f4baa87c56560d8a6ce95f4e0f077f1791c009e2"
   },
   {
    "path": "gfs/swe/north_america_west/2026.nc",
    "asset": "gfs__swe__north_america_west__2026.nc",
-   "bytes": 432024,
-   "sha256": "ab16df0e0a0ffbffa61429685fbdd81d0c269e723070264537f8f2cd443ff9a3"
+   "bytes": 429704,
+   "sha256": "fb1b0ecb95258de9583d3c3d6c64f20a06fac4a0c785b54d79be83199587b020"
   },
   {
    "path": "gfs/t2m/europe/2021.nc",

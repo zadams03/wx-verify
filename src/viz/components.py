@@ -81,7 +81,10 @@ VARIABLE_NOTES = {
     "swe": (
         "Snow water equivalent (mm of water) is the GFS water equivalent of the snow on the ground (`WEASD`) "
         "compared with ERA5 snow depth (given in metres of water equivalent). GFS has no value over open "
-        "water, so those points are left out of the sample, and the excluded share is shown. ECMWF is not "
+        "water, so those points are left out of the sample. ERA5 cells whose snow never melts out (ERA5 "
+        "glaciers, holding 1–10 m of water all year; 139 cells in western North America, none in Europe) "
+        "are also left out: an ERA5 Aug–Sep minimum of at least 10 mm in every year 2015–2026. The "
+        "excluded share is shown. ECMWF is not "
         "included: its open data has snow depth only from November 2025. ERA5 snow is a model product and a "
         "weaker truth than ERA5 temperature or pressure, especially in complex terrain and on glaciers."
     ),
@@ -108,7 +111,7 @@ VARIABLE_NOTES = {
 def swe_note(excluded_fraction: float) -> str:
     """Sample note for snow water equivalent, with the excluded share of this region and window."""
     return (f"Snow water equivalent: {excluded_fraction:.1%} of this region's grid-point forecasts are "
-            "excluded because GFS has no snow value there (open water).")
+            "excluded because GFS has no snow value there (open water) or ERA5 has permanent snow (glaciers).")
 
 
 def freezing_level_note(masked_fraction: float) -> str:
