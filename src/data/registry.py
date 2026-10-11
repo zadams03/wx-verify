@@ -23,6 +23,22 @@ class UnitConversion:
 
 
 @dataclass(frozen=True)
+class NCSSField:
+    """The same GFS field in the NCAR archive's THREDDS NetCDF Subset Service (d084001, Phase 12).
+
+    var: the THREDDS grid name; vert: the level asked for with ``vertCoord`` (m above ground or Pa),
+    None for single-level fields; units: as THREDDS labels them (the GRIB units, so the registry
+    conversion applies unchanged). bucket_var: for precipitation, the 6-hour bucket used before GFS
+    v15.1, when the archive has no accumulation from initialisation.
+    """
+
+    var: str
+    units: str
+    vert: float | None = None
+    bucket_var: str | None = None
+
+
+@dataclass(frozen=True)
 class GFSField:
     """A field in a GFS GRIB2 file, located through its ``.idx`` line.
 
@@ -38,6 +54,7 @@ class GFSField:
     # Forecast-step column of the .idx line, formatted with the lead (``{hour}``) and its length in
     # days (``{day}``). None: the instantaneous "{lead} hour fcst".
     idx_step: str | None = None
+    ncss: NCSSField | None = None        # name in the NCAR archive (2015-01-15 → 2021-03-22)
 
     def step_string(self, lead_h: int) -> str:
         if self.idx_step is None:
@@ -230,6 +247,7 @@ VARIABLES: dict[str, VariableSpec] = {
             grib_filter={"typeOfLevel": "heightAboveGround", "level": 2},
             short_name="t2m",
             conversion=_KELVIN_TO_CELSIUS,
+            ncss=NCSSField("Temperature_height_above_ground", "K", vert=2.0),
         ),
         ecmwf=ECMWFField(
             param="2t",
@@ -244,7 +262,7 @@ VARIABLES: dict[str, VariableSpec] = {
         key="msl",
         valid_range=(850.0, 1090.0),
         gfs=GFSField("PRMSL", "mean sea level", {"typeOfLevel": "meanSea"},
-                     "prmsl", conversion=_PA_TO_HPA),
+                     "prmsl", conversion=_PA_TO_HPA, ncss=NCSSField("Pressure_reduced_to_MSL_msl", "Pa")),
         ecmwf=ECMWFField("msl", "sfc", {"typeOfLevel": "meanSea"},
                          "msl", conversion=_PA_TO_HPA),
         era5=ERA5Field(("mean_sea_level_pressure",), ("msl",), conversion=_PA_TO_HPA),
@@ -253,7 +271,7 @@ VARIABLES: dict[str, VariableSpec] = {
         key="z500",
         valid_range=(4500.0, 6200.0),
         gfs=GFSField("HGT", "500 mb", {"typeOfLevel": "isobaricInhPa", "level": 500},
-                     "gh"),
+                     "gh", ncss=NCSSField("Geopotential_height_isobaric", "gpm", vert=50000.0)),
         ecmwf=ECMWFField("gh", "pl", {"typeOfLevel": "isobaricInhPa", "level": 500}, "gh",
                          levelist="500"),
         era5=ERA5Field(("geopotential",), ("z",), conversion=UnitConversion(scale=1 / GRAVITY),
@@ -263,8 +281,10 @@ VARIABLES: dict[str, VariableSpec] = {
         key="ws10",
         valid_range=(0.0, 90.0),
         gfs=SpeedField(
-            u=GFSField("UGRD", "10 m above ground", {"typeOfLevel": "heightAboveGround", "level": 10}, "u10"),
-            v=GFSField("VGRD", "10 m above ground", {"typeOfLevel": "heightAboveGround", "level": 10}, "v10"),
+            u=GFSField("UGRD", "10 m above ground", {"typeOfLevel": "heightAboveGround", "level": 10}, "u10",
+                       ncss=NCSSField("u-component_of_wind_height_above_ground", "m/s", vert=10.0)),
+            v=GFSField("VGRD", "10 m above ground", {"typeOfLevel": "heightAboveGround", "level": 10}, "v10",
+                       ncss=NCSSField("v-component_of_wind_height_above_ground", "m/s", vert=10.0)),
         ),
         ecmwf=SpeedField(
             u=ECMWFField("10u", "sfc", {"typeOfLevel": "heightAboveGround", "level": 10}, "u10"),
@@ -278,8 +298,10 @@ VARIABLES: dict[str, VariableSpec] = {
         valid_range=(-1000.0, 10000.0),
         gfs=MaskedLevelField(
             level=GFSField("HGT", "highest tropospheric freezing level",
-                           {"typeOfLevel": "highestTroposphericFreezing"}, "gh"),
-            surface=GFSField("HGT", "surface", {"typeOfLevel": "surface"}, "orog"),
+                           {"typeOfLevel": "highestTroposphericFreezing"}, "gh",
+                           ncss=NCSSField("Geopotential_height_highest_tropospheric_freezing", "gpm")),
+            surface=GFSField("HGT", "surface", {"typeOfLevel": "surface"}, "orog",
+                             ncss=NCSSField("Geopotential_height_surface", "gpm")),
         ),
         era5=ERA5Field(("zero_degree_level", "geopotential"), ("deg0l", "z"),
                        derive="freezing_level", climatology=None),
@@ -290,7 +312,8 @@ VARIABLES: dict[str, VariableSpec] = {
         valid_range=(-1.0, 15000.0),    # mm of water; ERA5 holds up to ~10 m on glaciers
         # GFS WEASD (kg m⁻² = mm) is missing over open water; ERA5 `sd` (m of water equivalent) is defined
         # everywhere (0 over sea). ECMWF open data has `sd` only from 2025-11-20, so ECMWF is parked.
-        gfs=GFSField("WEASD", "surface", {"typeOfLevel": "surface"}, "sdwe"),
+        gfs=GFSField("WEASD", "surface", {"typeOfLevel": "surface"}, "sdwe",
+                     ncss=NCSSField("Water_equivalent_of_accumulated_snow_depth_surface", "kg.m-2")),
         # ERA5 is also undefined on its permanent-snow (glacier) cells, which hold 1–10 m of water all year.
         era5=ERA5Field(("snow_depth",), ("sd",), conversion=_M_TO_MM, climatology=None, derive="snow",
                        static_mask=PERMANENT_SNOW),
@@ -301,8 +324,10 @@ VARIABLES: dict[str, VariableSpec] = {
         valid_range=(-1.0, 2500.0),     # mm; the raw files hold accumulations up to 10 days
         # GFS: the continuous 0→N accumulation, labelled "0-N day acc fcst" at multiples of 24 h
         # (the 6-hour buckets "{L-6}-{L} hour acc fcst" sit beside it and are not used).
-        gfs=AccumulationField(GFSField("APCP", "surface", {"typeOfLevel": "surface"}, "tp",
-                                       idx_step="0-{day} day acc fcst")),
+        gfs=AccumulationField(GFSField(
+            "APCP", "surface", {"typeOfLevel": "surface"}, "tp", idx_step="0-{day} day acc fcst",
+            ncss=NCSSField("Total_precipitation_surface_Mixed_intervals_Accumulation", "kg.m-2",
+                           bucket_var="Total_precipitation_surface_6_Hour_Accumulation"))),
         ecmwf=AccumulationField(ECMWFField("tp", "sfc", {"typeOfLevel": "surface"}, "tp",
                                            conversion=_M_TO_MM)),
         era5=ERA5Field(("total_precipitation",), ("tp",), conversion=_M_TO_MM,

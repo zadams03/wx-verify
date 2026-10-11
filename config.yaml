@@ -7,14 +7,15 @@ models:
     enabled: true
     sources:
       - {name: aws,  start: "2021-03-23", end: "2026-09-20"}
-      - {name: ncar, start: "2015-01-15", end: "2021-03-22", enabled: false}   # Phase 12
+      - {name: ncar, start: "2015-01-15", end: "2021-03-22"}   # Phase 12: NCAR d084001 via THREDDS NCSS
   ecmwf:
     enabled: true               # Phase 9
     sources:
       - {name: aws,  start: "2024-02-01", end: "2026-09-20"}
 
 model_versions:                 # vertical markers on time-based views
-  gfs:   [{name: "v15", date: "2019-06-12"}, {name: "v16", date: "2021-03-22"}]
+  gfs:   [{name: "v13", date: "2016-05-11"}, {name: "v14", date: "2017-07-19"},
+          {name: "v15", date: "2019-06-12"}, {name: "v16", date: "2021-03-22"}]   # first run affected: 12z each
   ecmwf: [{name: "49r1", date: "2024-11-12"}, {name: "50r1", date: "2026-05-12"}]
 
 variables:
@@ -24,7 +25,7 @@ variables:
   ws10: {long_name: "10m wind speed", units: "m/s", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: true}
   frzl: {long_name: "Freezing level", units: "m", scores: [bias, rmse], models: [gfs], enabled: true}
   tp24: {long_name: "24h precipitation", units: "mm", scores: [freq_bias, ets, bias], thresholds: [1, 5, 10], models: [gfs, ecmwf], enabled: true}
-  swe:  {long_name: "Snow water equivalent", units: "mm", scores: [bias, rmse], models: [gfs], enabled: true}   # ECMWF parked: open data has sd only from 2025-11-20
+  swe:  {long_name: "Snow water equivalent", units: "mm", scores: [bias, rmse], models: [gfs], enabled: true, start: "2021-03-23"}   # ECMWF parked: open data has sd only from 2025-11-20; not backfilled (GFS WEASD over sea changes with version)
 
 domains:
   europe:

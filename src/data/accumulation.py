@@ -15,7 +15,8 @@ import xarray as xr
 NEGATIVE_TOLERANCE_MM = 1.0
 
 
-def window_totals(acc: xr.DataArray, leads: list[int], window_h: int) -> xr.DataArray:
+def window_totals(acc: xr.DataArray, leads: list[int], window_h: int,
+                  windowed: np.ndarray | None = None) -> xr.DataArray:
     """Window totals ending at each lead from accumulations at the raw file's steps.
 
     ``acc`` has dims (init_time, lead_time, lat, lon) with lead_time = the steps fetched and a boolean
@@ -23,6 +24,9 @@ def window_totals(acc: xr.DataArray, leads: list[int], window_h: int) -> xr.Data
     only where both accumulations are present, and an ``n_clipped`` (init_time, lead_time) coord counting
     the grid points whose difference was slightly negative (packing noise: the two accumulations are packed
     separately) and was set to 0. Totals are NaN where either accumulation is missing.
+
+    ``windowed`` (bool per init time): runs whose values at the leads already are the window totals (GFS before
+    v15.1: four 6-hour buckets summed at fetch time); they are taken as they are, present where the lead is.
     """
     steps = list(acc.lead_time.values)
     present = acc["present"].values.astype(bool)
@@ -39,6 +43,9 @@ def window_totals(acc: xr.DataArray, leads: list[int], window_h: int) -> xr.Data
             lo = steps.index(lead - window_h)
             diff = values[:, hi].astype("float64") - values[:, lo].astype("float64")
             have = present[:, hi] & present[:, lo]
+        if windowed is not None and windowed.any():
+            diff[windowed] = values[windowed, hi].astype("float64")
+            have = np.where(windowed, present[:, hi], have)
         neg = diff < 0
         if (diff[have] < -NEGATIVE_TOLERANCE_MM).any():
             raise ValueError(f"accumulation at +{lead}h is {float(diff[have].min()):.2f} mm below the one "

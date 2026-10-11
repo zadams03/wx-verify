@@ -70,6 +70,13 @@ def _aggregation_args(cfg: Config, variable: str) -> dict:
             "thresholds": cfg.variables[variable].thresholds if "ets" in cfg.variables[variable].scores else None}
 
 
+def variable_init_dates(cfg: Config, fetcher: BaseFetcher, variable: str, year: int, month: int) -> list[date]:
+    """Init dates of the month that a model verifies for ``variable``: the fetcher's dates from the
+    variable's configured ``start`` on (snow water equivalent is not verified before 2021-03-23)."""
+    start = cfg.variables[variable].start
+    return [d for d in fetcher.init_dates(year, month) if start is None or d >= start]
+
+
 def era5_months(init_dates: list[date], lead_times: list[int]) -> list[tuple[int, int]]:
     """Calendar months holding the valid times of forecasts from ``init_dates``."""
     first = pd.Timestamp(min(init_dates))
@@ -148,12 +155,14 @@ def process_month(
     gfs = FETCHERS[model](cfg)
     era5 = ERA5Fetcher(cfg)
     clim = ensure_climatology(cfg, variable, domain)
+    if init_dates is None:
+        init_dates = variable_init_dates(cfg, gfs, variable, year, month)
 
     gfs_path = gfs.fetch_month(variable, domain, year, month, init_dates=init_dates)
     _validated(gfs, gfs_path, variable, domain)
     forecast = gfs.load(gfs_path, variable)
 
-    inits = init_dates if init_dates is not None else gfs.init_dates(year, month)
+    inits = init_dates
     hours = required_hours(cfg.runs, cfg.lead_times_hours)
     era5_files = []
     for y, m in era5_months(inits, cfg.lead_times_hours):
@@ -260,17 +269,22 @@ def models_for(cfg: Config, variable: str, year: int, month: int, only: str | No
     return [
         m for m in cfg.enabled_models()
         if m in FETCHERS and m in cfg.variables[variable].models and (only is None or m == only)
-        and FETCHERS[m](cfg).init_dates(year, month)
+        and variable_init_dates(cfg, FETCHERS[m](cfg), variable, year, month)
     ]
 
 
-def _prefetch_months(cfg: Config, inits: list[date], only_model: str | None) -> list[tuple[int, int]]:
+def _prefetch_months(cfg: Config, inits: list[date], only_model: str | None,
+                     run_end: tuple[int, int] | None = None) -> list[tuple[int, int]]:
     """ERA5 months to request now: those the month needs plus every later month up to the last
-    one any enabled model's period needs. All years are submitted at once, so their requests
-    queue in CDS while earlier months are processed (queue time dominates the wait)."""
+    one any enabled model's period needs — or, with ``run_end`` (the last month this run processes), up
+    to the last one that month needs. All years are submitted at once, so their requests queue in CDS
+    while earlier months are processed (queue time dominates the wait)."""
     needed = era5_months(inits, cfg.lead_times_hours)
     ends = [cfg.models[m].end for m in cfg.enabled_models() if only_model in (None, m)]
-    last = era5_months([max(ends)], cfg.lead_times_hours)[-1]
+    end = max(ends)
+    if run_end is not None:
+        end = min(end, pd.Period(f"{run_end[0]}-{run_end[1]:02d}", "M").end_time.date())
+    last = era5_months([end], cfg.lead_times_hours)[-1]
     span = [(p.year, p.month) for p in pd.period_range(f"{needed[0][0]}-{needed[0][1]:02d}", f"{last[0]}-{last[1]:02d}", freq="M")]
     return sorted(set(needed) | set(span))
 
@@ -284,6 +298,7 @@ def process_domain_month(
     only_model: str | None = None,
     keep_raw: bool | None = None,
     force: bool = False,
+    run_end: tuple[int, int] | None = None,
 ) -> tuple[dict, list[str]]:
     """Process every model and variable of one domain-month in a single pass.
 
@@ -310,11 +325,12 @@ def process_domain_month(
     failed: list[str] = []
     if todo:
         batch = list(todo)
-        inits = sorted({d for v in todo for m in todo[v][0] for d in FETCHERS[m](cfg).init_dates(year, month)})
+        inits = sorted({d for v in todo for m in todo[v][0]
+                        for d in variable_init_dates(cfg, FETCHERS[m](cfg), v, year, month)})
         hours = required_hours(cfg.runs, cfg.lead_times_hours)
         try:
             ERA5Fetcher(cfg).ensure_months(batch, domain, era5_months(inits, cfg.lead_times_hours), hours,
-                                           prefetch=_prefetch_months(cfg, inits, only_model))
+                                           prefetch=_prefetch_months(cfg, inits, only_model, run_end))
         except Exception:
             logger.exception("ERA5 batch FAILED %s %s %s", domain, label, batch)
         for v, (models, pending, comparison) in todo.items():
@@ -459,7 +475,7 @@ def main(argv: list[str] | None = None) -> int:
                 t = time.time()
                 results, bad = process_domain_month(
                     cfg, domain, year, month, variables, only_model=args.model,
-                    keep_raw=True if args.keep_raw else None, force=args.force)
+                    keep_raw=True if args.keep_raw else None, force=args.force, run_end=months[-1])
                 failed += bad
                 if results:
                     done += 1

@@ -137,6 +137,8 @@ class ByteRangeFetcher(BaseFetcher):
       present (init_time, lead_time) int8 — 0 where the file could not be fetched
       surface (init_time, lead_time, latitude, longitude) float32, source units — only for
               fields masked against the model's surface height (freezing level)
+      windowed (init_time) int8 — accumulated fields only: 1 for a run whose values at the leads are
+              already window totals (GFS before v15.1, summed 6-hour buckets); its other steps are absent
     For an accumulated field (precipitation) lead_time holds the steps whose accumulation is needed
     (each lead and the step a window earlier); ``load`` turns them into window totals at the leads.
     """
@@ -154,6 +156,20 @@ class ByteRangeFetcher(BaseFetcher):
 
     def _decode(self, grib_path: Path, field, bounds) -> xr.DataArray:
         raise NotImplementedError
+
+    def windowed(self, field, init_date: date, run_hour: int) -> bool:
+        """True when this run's accumulated field is fetched as window totals at the leads."""
+        return False
+
+    def job_steps(self, field, init_date: date, run_hour: int) -> list[int]:
+        """Steps downloaded for one run: the file's steps, or only the leads for a windowed run."""
+        if isinstance(field, AccumulationField) and self.windowed(field, init_date, run_hour):
+            return list(self.config.lead_times_hours)
+        return self.fetch_steps(field)
+
+    def pool_size(self, jobs: list) -> int:
+        """Parallel requests for these jobs."""
+        return self.workers
 
     def raw_path(self, variable: str, domain: str, year: int, month: int) -> Path:
         return paths.raw_dir(self.model, domain) / f"{variable}_{year:04d}-{month:02d}.nc"
@@ -179,7 +195,7 @@ class ByteRangeFetcher(BaseFetcher):
             raise ValueError(f"No {self.label} init dates in {year}-{month:02d} within configured sources")
         runs = [int(r) for r in cfg.runs]
         leads = self.fetch_steps(field)
-        jobs = [(d, r, h) for d in dates for r in runs for h in leads]
+        jobs = [(d, r, h) for d in dates for r in runs for h in self.job_steps(field, d, r)]
 
         out.parent.mkdir(parents=True, exist_ok=True)
         tmp_dir = out.parent / ".tmp"
@@ -233,6 +249,9 @@ class ByteRangeFetcher(BaseFetcher):
 
         dims = ("init_time", "lead_time", "latitude", "longitude")
         variables = {"present": (("init_time", "lead_time"), present)}
+        if isinstance(field, AccumulationField):
+            variables["windowed"] = ("init_time", np.array(
+                [self.windowed(field, d, r) for d in dates for r in runs], dtype="int8"))
         if isinstance(field, MaskedLevelField):
             variables["data"], variables["surface"] = (dims, data[:, :, 0]), (dims, data[:, :, 1])
         else:
@@ -254,9 +273,13 @@ class ByteRangeFetcher(BaseFetcher):
         logger.info("Saved %s (%d/%d fields)", out.name, len(jobs) - n_failed, len(jobs))
         return out
 
-    def _download_parts(self, session, job, field) -> list[bytes]:
-        """Download every GRIB message the field needs (two for a wind-speed field)."""
-        return [self._download(session, job, f) for f in _parts(field)]
+    def _download_parts(self, session, job, field, bounds) -> list[tuple[bytes, object]]:
+        """(bytes, part field) of every message the field needs (two for a wind-speed field)."""
+        return [(self._download(session, job, f), f) for f in _parts(field)]
+
+    def _combine_parts(self, job, parts: list[xr.DataArray], field) -> xr.DataArray:
+        """One array per job from its decoded parts."""
+        return _combine(parts, field)
 
     def _decode_bytes(self, content: bytes, field, bounds, tmp_dir: Path) -> xr.DataArray:
         with tempfile.NamedTemporaryFile(dir=tmp_dir, suffix=".grib2", delete=False) as tf:
@@ -270,14 +293,13 @@ class ByteRangeFetcher(BaseFetcher):
         """Download ``jobs`` with MAX_WORKERS threads and decode them on this thread
         (ecCodes is not guaranteed thread-safe). Returns {job: exception} for failures."""
         failures: dict = {}
-        with ThreadPoolExecutor(max_workers=self.workers) as pool:
-            futures = {pool.submit(self._download_parts, session, job, field): job for job in jobs}
+        with ThreadPoolExecutor(max_workers=self.pool_size(jobs)) as pool:
+            futures = {pool.submit(self._download_parts, session, job, field, bounds): job for job in jobs}
             for fut in as_completed(futures):
                 job = futures[fut]
                 try:
-                    parts = [self._decode_bytes(c, f, bounds, tmp_dir)
-                             for c, f in zip(fut.result(), _parts(field))]
-                    da = _combine(parts, field)
+                    parts = [self._decode_bytes(c, f, bounds, tmp_dir) for c, f in fut.result()]
+                    da = self._combine_parts(job, parts, field)
                 except Exception as exc:
                     failures[job] = exc
                     continue
@@ -329,7 +351,8 @@ class ByteRangeFetcher(BaseFetcher):
         da = field.conversion.apply(ds["data"].astype("float64")).astype("float32")
         da = da.assign_coords(present=(("init_time", "lead_time"), ds["present"].values.astype(bool)))
         if isinstance(field, AccumulationField):
-            da = window_totals(da, list(self.config.lead_times_hours), field.window_h)
+            windowed = ds["windowed"].values.astype(bool) if "windowed" in ds else None
+            da = window_totals(da, list(self.config.lead_times_hours), field.window_h, windowed=windowed)
         if "surface" in ds:
             da = da.assign_coords(surface_height=ds["surface"].astype("float32"))
         da.attrs.update(source=self.label, variable=variable)

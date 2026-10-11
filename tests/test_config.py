@@ -37,7 +37,12 @@ def test_repo_config_loads():
     assert cfg.enabled_models() == ["gfs", "ecmwf"]
     assert cfg.enabled_variables() == ["t2m", "msl", "z500", "ws10", "frzl", "tp24", "swe"]
     assert cfg.enabled_domains() == ["europe", "north_america_west"]
-    assert cfg.models["gfs"].start == date(2021, 3, 23)
+    assert cfg.models["gfs"].start == date(2015, 1, 15)
+    assert [(s.name, s.start, s.end) for s in cfg.models["gfs"].active_sources()] == [
+        ("aws", date(2021, 3, 23), date(2026, 9, 20)), ("ncar", date(2015, 1, 15), date(2021, 3, 22))]
+    assert [(v.name, v.date) for v in cfg.model_versions["gfs"]] == [
+        ("v13", date(2016, 5, 11)), ("v14", date(2017, 7, 19)), ("v15", date(2019, 6, 12)), ("v16", date(2021, 3, 22))]
+    assert cfg.variables["swe"].start == date(2021, 3, 23) and cfg.variables["t2m"].start is None
     assert cfg.models["gfs"].end == date(2026, 9, 20)
     assert cfg.models["ecmwf"].start == date(2024, 2, 1)
     assert cfg.models["ecmwf"].end == date(2026, 9, 20)
@@ -52,9 +57,11 @@ def test_repo_config_europe_regions():
     assert regions["Norwegian Mountains"].lon_max == 31
 
 
-def test_active_sources_excludes_disabled_ncar():
-    gfs = load_config().models["gfs"]
-    assert [s.name for s in gfs.active_sources()] == ["aws"]
+def test_active_sources_excludes_a_disabled_source(raw):
+    d = copy.deepcopy(raw)
+    d["models"]["gfs"]["sources"][1]["enabled"] = False
+    gfs = parse_config(d).models["gfs"]
+    assert [s.name for s in gfs.active_sources()] == ["aws"] and gfs.start == date(2021, 3, 23)
 
 
 def test_missing_file_raises(tmp_path):

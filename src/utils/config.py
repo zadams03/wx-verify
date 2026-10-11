@@ -93,6 +93,7 @@ class VariableConfig:
     models: list[str]
     enabled: bool
     thresholds: list[float] = field(default_factory=list)
+    start: date | None = None     # first init date verified for this variable (None: each model's own start)
 
 
 @dataclass(frozen=True)
@@ -325,6 +326,7 @@ def _parse_variables(value: Any, models: dict[str, ModelConfig]) -> dict[str, Va
             models=list(var_models),
             enabled=enabled,
             thresholds=[float(t) for t in thresholds],
+            start=_parse_date(v["start"], f"{where}.start") if "start" in v else None,
         )
     return variables
 
