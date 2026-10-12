@@ -78,7 +78,13 @@ class ImplausibleField(ResponseMismatch):
 
 
 class NotInArchive(FileNotFoundError):
-    """The archive does not list this run/step at all (10 of 4,518 runs lack a needed file) — not retried."""
+    """The archive does not list this run/step at all (10 of 4,518 runs lack a needed file), or lists it but
+    the file lacks the field (NCSS answers 400 "… is not contained in the requested dataset"; three 2016
+    files) — not retried."""
+
+
+def _lacks_field(resp: requests.Response) -> bool:
+    return resp.status_code == 400 and "is not contained in the requested dataset" in resp.text
 
 
 _LISTED: dict[date, frozenset[str] | None] = {}
@@ -144,8 +150,13 @@ def download_field(session: requests.Session, init_date: date, run_hour: int, st
                    bounds, bucket: bool = False, alone: bool = False) -> bytes:
     """netCDF bytes of one field. 404s and timeouts are retried like any failed request (``get``): the
     server has returned a passing 404 for a file it lists. ``alone``: with no other request in flight."""
+    url = ncss_url(init_date, run_hour, step_h, field, bounds, bucket)
     with _request_slot(alone):
-        content = get(session, ncss_url(init_date, run_hour, step_h, field, bounds, bucket), timeout=300).content
+        try:
+            content = get(session, url, timeout=300, give_up=_lacks_field).content
+        except FileNotFoundError as exc:
+            raise NotInArchive(f"{url.split('?')[0].rsplit('/', 1)[1]} is in the archive without "
+                               f"{url.split('var=')[1].split('&')[0]}") from exc
     if content[:3] != b"CDF":
         raise ResponseMismatch(f"NCSS returned no netCDF for {init_date} {run_hour:02d}z +{step_h}h: {content[:120]!r}")
     return content

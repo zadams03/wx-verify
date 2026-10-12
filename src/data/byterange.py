@@ -57,12 +57,15 @@ class TransientFetchError(RuntimeError):
 
 
 def get(session: requests.Session, url: str, headers: dict | None = None,
-        timeout: int = 60) -> requests.Response:
-    """GET with exponential-backoff retries; raises after the final attempt."""
+        timeout: int = 60, give_up=None) -> requests.Response:
+    """GET with exponential-backoff retries; raises after the final attempt. ``give_up(response)``: True
+    for a failed response that no retry can fix — FileNotFoundError at once."""
     last: Exception | None = None
     for attempt in range(_MAX_ATTEMPTS):
         try:
             resp = session.get(url, headers=headers, timeout=timeout)
+            if not resp.ok and give_up is not None and give_up(resp):
+                raise FileNotFoundError(f"{url}: {resp.status_code} {resp.text[:200]}")
             resp.raise_for_status()
             return resp
         except requests.RequestException as exc:

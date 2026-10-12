@@ -121,6 +121,20 @@ def test_a_file_the_archive_does_not_list_is_missing_without_retries(monkeypatch
         ncar.fetch_field(None, date(2021, 3, 8), 12, 240, T2M, BOX)
 
 
+def test_a_listed_file_without_the_field_is_missing_without_retries():
+    class Session:
+        calls = 0
+
+        def get(self, url, headers=None, timeout=0):
+            Session.calls += 1
+            r = requests.Response()
+            r.status_code, r._content = 400, b"Variable: Temperature_height_above_ground is not contained in the requested dataset"
+            return r
+    with pytest.raises(ncar.NotInArchive, match="without Temperature_height_above_ground"):
+        ncar.fetch_field(Session(), date(2016, 10, 20), 0, 120, T2M, BOX)
+    assert Session.calls == 1
+
+
 def test_the_day_catalog_is_read_once_and_parsed(monkeypatch):
     calls = []
     xml = '<dataset name="gfs.0p25.2016011500.f024.grib2" /><dataset name="gfs.0p25.2016011512.f240.grib2" />'
