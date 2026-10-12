@@ -158,6 +158,7 @@ wx-verify/
 │   ├── apply_swe_mask.py      ← v1.8.1 one-off: applied that mask to the existing swe aggregates
 │   ├── verify_raw.py          ← Phase 12: fetches every stored NCAR field a second time, settles disagreements with copies fetched alone, patches the raw file (needs --keep-raw)
 │   ├── outlier_scan.py        ← Phase 12: flags backfilled months > 4 robust SDs from the record; re-fetches a sample and compares with the raw file
+│   ├── make_readme_figures.py ← Step 85: regenerates docs/figures/*.png from committed data with the dashboard's own builders (kaleido + local Chrome/Chromium)
 │   └── era5_source_test.py    ← Phase 10b one-off: ARCO-ERA5 / NCAR ERA5 vs CDS (test-only packages gcsfs, zarr, s3fs, h5netcdf; not in requirements.txt)
 │
 ├── src/
@@ -189,10 +190,13 @@ wx-verify/
 │   └── viz/
 │       ├── skill_curves.py    ← Skill vs lead time plots
 │       ├── spatial_maps.py    ← Gridded error maps (Scattergeo), region zoom
+│       ├── dashboard_data.py  ← Table/map loaders, region summaries, paired run counts, difference maps — shared by the dashboard and the README figure script (step 85)
 │       └── components.py      ← Reusable Streamlit UI components
 │
 ├── dashboard/
 │   └── app.py                 ← Streamlit entry point (reads data/dashboard/ only)
+│
+├── docs/figures/              ← Committed README figures (docs/*.txt prompts are gitignored)
 │
 ├── notebooks/
 │   └── exploration.ipynb      ← Scratch space — not part of dashboard
@@ -273,7 +277,7 @@ Per-variable source mappings (GRIB short names, CDS names, unit conversions) liv
 | Version control | Git / GitHub | Source of truth |
 | Environment | Python venv | Reproducible dependencies |
 | IDE | VS Code | Windows and macOS (Apple Silicon); Claude Code compatible |
-| Dev dependencies | requirements-dev.txt (pytest) | Kept out of the deployment requirements |
+| Dev dependencies | requirements-dev.txt (pytest, kaleido) | Kept out of the deployment requirements; kaleido exports the README figures |
 
 ### 4.4 Data Storage Design (from Phase 8)
 Goal: least disk space, exact metrics for any date window, and a small committed footprint for Streamlit Cloud.
@@ -574,7 +578,8 @@ Build steps:
 82. ✓ Kickoff checks (report before building): NCAR RDA `d084001` access — whether byte-range/index access or server-side subsetting is possible; if only whole files, estimate download volume and propose a reduced sample (e.g. 00z only) for Zac to approve. Confirm GFS v13/v14 dates.
 83. ✓ `gfs_ncar_fetcher.py` as a second GFS source. Enable `ncar` source; run GFS for all enabled variables and domains back to 2015-01-15 (variables limited to what the archive provides). *Scope reduced to 2016 by Zac's decision (Session 8); more years run with the same code.*
 84. ✓ Skill-through-time view: pick two periods (e.g. a year a decade ago vs the latest year), same model/variable/region; overlaid skill curves and a difference map; model-version markers and which versions each period covers.
-85. Final README (written with Zac — not by Claude Code), full audit. Tag `v2.0`. Commit: "Phase 12 complete — wx-verify v2.0".
+85. ✓ Final README (written with Zac — not by Claude Code), full audit. Tag `v2.0`. Commit: "Phase 12 complete — wx-verify v2.0".
+    - README drafted and every number recomputed from the committed tables by Claude.ai (12 Oct). Two figures (Session 9): GFS vs ECMWF t2m skill curves, Western Europe, paired runs; RMSE GFS − ECMWF map, 24 h, europe, map years 2024–2026. Built by `scripts/make_readme_figures.py`; the dashboard's table/map loading and difference-map logic moved unchanged from `dashboard/app.py` to `src/viz/dashboard_data.py` so both use one code path (tests: `tests/test_dashboard_data.py`; suite 367 passed, 1 skipped).
 
 **Phase 12 build notes (Session 8, Oct 2026):**
 - **Access (step 82).** NCAR GDEX `d084001` holds one GRIB2 file per run and 3-hourly step (`gfs.0p25.YYYYMMDDHH.fFFF.grib2`) with no `.idx` files; whole-file download ran at ~0.7 MB/s. Its THREDDS NetCDF Subset Service cuts one field to the domain on the server and returns netCDF-3 (longitudes continue past 360°, latitude descends, times "Hour since …Z"). Decoded values equal the AWS byte-range path on the 2021 overlap. Field names/levels/units live in the registry (`NCSSField`). Precipitation: from v15.1 (2019-06-12 12z) a file holds the 0→N accumulation beside the 6-hour bucket (THREDDS "Mixed_intervals", needs `temporal=all`); before it only the bucket exists, so a 24 h window is the sum of four buckets (raw files carry a `windowed` flag per run, so a month spanning v15.1 works). GFS v13/v14 dates confirmed (3.8); v12 from EMC's implementation page.

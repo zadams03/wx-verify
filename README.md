@@ -1,245 +1,189 @@
 # wx-verify
 
-**NWP Forecast Verification Dashboard — GFS 2m Temperature over Western Europe**
-
-wx-verify measures how accurately the NOAA Global Forecast System (GFS) predicts surface temperatures across Western Europe, and how that accuracy deteriorates as forecasts look further into the future. It ingests publicly archived GFS model output alongside ERA5 reanalysis data, computes standard meteorological skill scores, and presents the results through an interactive Streamlit dashboard.
+**Verification of operational weather forecasts (GFS and ECMWF IFS) against ERA5 reanalysis over Europe and western North America, with a focus on mountain regions.**
 
 > **Live dashboard:** https://wx-verify-uvv947uunr9zlvzg6bp5mx.streamlit.app/
 
----
-
-## The Science
-
-### Numerical Weather Prediction and Why Verification Matters
-
-Numerical weather prediction (NWP) models solve the equations of fluid dynamics and thermodynamics on a global grid to forecast the evolution of the atmosphere. They are extraordinarily complex — the GFS alone solves billions of equations per forecast run — but their skill is finite and decays with lead time. By around day ten, most operational models are only marginally better than a random draw from climatology.
-
-Verification is the systematic measurement of this skill. Without it, forecasters have no principled basis for deciding how much weight to give a model at different lead times or in different conditions. Operational centres like ECMWF and NOAA publish verification scores internally; wx-verify builds a lightweight equivalent using open-access data.
-
-This project verifies GFS 2m temperature (T2m) — the temperature two metres above the surface — against ERA5 reanalysis. T2m is a natural starting point: it is directly relevant to public forecasts, densely observed, and carries a clean verification signal.
-
-### ERA5 as Ground Truth
-
-ERA5 is the fifth-generation atmospheric reanalysis produced by the European Centre for Medium-Range Weather Forecasts (ECMWF). A reanalysis is not a raw observation: it is the output of a data assimilation system that blends millions of real-world observations — radiosondes, satellites, aircraft, buoys — with a short-range NWP model to produce the best physically consistent reconstruction of the atmospheric state at every point in space and time. ERA5 covers 1940 to the present at 0.25° horizontal resolution and is widely regarded as the gold standard for verification over data-rich regions such as Western Europe.
-
-### Skill Metrics
-
-wx-verify computes three complementary metrics at each forecast lead time:
-
-**Bias** measures systematic error — whether the model consistently runs too warm or too cold:
-
-$$\text{Bias} = \frac{1}{N} \sum_{i=1}^{N} (F_i - O_i)$$
-
-A positive bias means the model is forecasting temperatures that are too high on average. Bias can be partially corrected through post-processing, making it distinct from random error.
-
-**Root Mean Square Error (RMSE)** measures the typical magnitude of forecast errors, with larger errors penalised more heavily because they are squared before averaging:
-
-$$\text{RMSE} = \sqrt{\frac{1}{N} \sum_{i=1}^{N} (F_i - O_i)^2}$$
-
-RMSE is expressed in °C and increases monotonically with lead time as forecast uncertainty accumulates.
-
-**Anomaly Correlation Coefficient (ACC)** is the primary metric used by operational NWP centres worldwide. It measures whether the model correctly identifies which areas will be warmer or cooler than normal — the *pattern* of departures from climatology, rather than absolute values:
-
-$$\text{ACC} = \frac{\sum (F'_i \cdot O'_i)}{\sqrt{\sum F'^2_i \cdot \sum O'^2_i}}$$
-
-where $F'$ and $O'$ are forecast and observed anomalies relative to climatological monthly means. ACC ranges from −1 to +1. The conventional operational threshold is **ACC = 0.6** — below this level a forecast is considered to have lost useful skill and a climatological mean would be nearly as informative. The skill degradation visible in the dashboard — ACC declining from above 0.9 at 24h to below 0.6 by day 10 — reflects the fundamental predictability limits of the atmosphere first described by Lorenz in the 1960s.
+wx-verify measures how accurate two global forecast models are, how that accuracy falls off with forecast lead time, how the two models compare on identical forecasts, and how GFS skill differs between 2016 and today. It fetches archived forecasts and ERA5 reanalysis, reduces them to monthly sufficient statistics, and serves the results through an interactive Streamlit dashboard.
 
 ---
 
-## Data Sources
+## What is verified
 
-| Source | What | Resolution | Access |
-|--------|------|-----------|--------|
-| NOAA GFS (AWS S3) | Archived operational forecasts | 0.25° / 6-hourly runs | Public, no key required |
-| ERA5 (Copernicus CDS) | Reanalysis "ground truth" | 0.25° / hourly | Free account + API key |
+| | |
+|---|---|
+| **Models** | NOAA GFS (00z and 12z runs) · ECMWF IFS HRES (00z and 12z runs, open data) |
+| **Truth** | ERA5 reanalysis, 0.25° |
+| **Lead times** | 24, 48, 72, 120, 240 h |
+| **Variables** | 2 m temperature · mean sea level pressure · 500 hPa geopotential height · 10 m wind speed · freezing level (GFS only) · 24 h precipitation · snow water equivalent (GFS only) |
+| **Domains** | Europe (35–72°N, 15°W–35°E) · western North America (36–62°N, 140–102°W) |
+| **Regions** | Western Europe, UK & Ireland, Scandinavia, Mediterranean, Central Europe, Iberian Peninsula, European Alps, Norwegian Mountains · Pacific Northwest, Western Canada, Rockies |
 
-GFS data is retrieved as byte-range extracts from NOAA's open data archive on AWS (`noaa-gfs-bdp-pds`), using the GRIB2 index files to download only the 2m temperature field (~350 KB per forecast file rather than the full ~400 MB GRIB). ERA5 data is fetched via the Copernicus Climate Data Store API.
+**Periods (forecast initialisation dates)**
 
----
-
-## Repository Structure
-
-```
-wx-verify/
-├── config.yaml               ← All run parameters (domain, dates, lead times)
-├── requirements.txt
-│
-├── src/
-│   ├── data/
-│   │   ├── base_fetcher.py   ← Abstract interface for model data fetchers
-│   │   ├── era5_fetcher.py   ← ERA5 acquisition via CDS API
-│   │   └── gfs_fetcher.py    ← GFS acquisition from NOAA AWS archive
-│   ├── processing/
-│   │   ├── alignment.py      ← Spatial/temporal alignment of forecast vs ERA5
-│   │   ├── climatology.py    ← Monthly T2m climatology and anomaly computation
-│   │   └── metrics.py        ← RMSE, bias, ACC calculation and output
-│   └── viz/
-│       ├── skill_curves.py   ← Plotly skill vs lead-time chart
-│       ├── spatial_maps.py   ← Plotly geographic metric maps
-│       └── components.py     ← Streamlit UI components and region presets
-│
-├── dashboard/
-│   └── app.py                ← Streamlit entry point
-│
-├── data/
-│   ├── raw/                  ← Cached GFS GRIB2 and ERA5 NetCDF (gitignored)
-│   └── processed/            ← Aligned arrays and metric outputs (gitignored)
-│
-└── tests/
-    ├── test_metrics.py       ← Unit tests for all three skill score functions
-    ├── test_alignment.py     ← Integration tests for data alignment
-    ├── test_era5_fetcher.py  ← Integration tests for ERA5 fetcher
-    └── test_gfs_fetcher.py   ← Integration tests for GFS fetcher
-```
+- GFS: 2016-01-01 → 2016-12-31 and 2021-03-01 → 2026-09-20. There is no data for 2017-01 → 2021-02; the dashboard never draws a line across the gap.
+- GFS snow water equivalent: 2021-03-23 → 2026-09-20 only.
+- ECMWF: 2024-02-01 → 2026-09-20 (the period in which ECMWF open data is at 0.25°).
 
 ---
 
-## Setup
+## Method
 
-### Prerequisites
+**Scores.** Bias, RMSE and anomaly correlation coefficient (ACC) for continuous variables; frequency bias and equitable threat score (ETS) at 1, 5 and 10 mm for 24 h precipitation. Freezing level and snow water equivalent get bias and RMSE only.
 
-- Python 3.11 or later (tested on 3.14)
-- A free [Copernicus Climate Data Store](https://cds.climate.copernicus.eu) account for ERA5 access
+**ACC.** Anomalies are taken against an ERA5 1991–2020 climatology by calendar month and hour of day. Skill curves and metric cards use spatial ACC (computed per forecast over the region, then averaged over forecasts), centred form. Maps use temporal ACC at each grid point.
 
-### 1. Clone and create a virtual environment
+**Area weighting and pooling.** Region scores are weighted by cos(latitude) and pooled over all grid points and forecasts (RMSE is the square root of the pooled mean squared error).
+
+**Homogeneous samples.** A forecast run is included only if every lead time has both forecast and ERA5 data, so every point on a skill curve uses the same forecasts. GFS vs ECMWF comparisons use only runs available for both models.
+
+**Exact valid-time matching.** Forecasts are compared with ERA5 at their exact valid time, on the ERA5 0.25° grid.
+
+**Storage.** For every grid point, lead time and month the pipeline stores sufficient statistics (count, Σe, Σe², and the anomaly sums needed for ACC; contingency counts for precipitation), so scores for any month window are exact sums rather than averages of averages. Region tables are committed to the repo (2.7 MB); per-year grid-point map files are hosted as GitHub Release assets and downloaded by the dashboard on first use.
+
+---
+
+## Headline results
+
+All numbers below are computed from the committed region tables.
+
+**GFS 2 m temperature, Western Europe** (2021-03 → 2026-09, 4,057 runs)
+
+| Lead | 24 h | 48 h | 72 h | 120 h | 240 h |
+|---|---|---|---|---|---|
+| RMSE (°C) | 1.41 | 1.51 | 1.64 | 2.03 | 3.26 |
+| ACC (centred) | 0.84 | 0.82 | 0.79 | 0.69 | 0.31 |
+
+ACC stays above the conventional 0.6 usefulness line at 120 h and is well below it at 240 h. Over the same period the European Alps 24 h RMSE is 1.94 °C.
+
+**GFS vs ECMWF, paired** (2024-02 → 2026-09, the same 1,926 runs for both)
+
+| | GFS | ECMWF |
+|---|---|---|
+| 2 m temperature, Western Europe, 24 h RMSE | 1.40 °C | 1.18 °C |
+| 2 m temperature, European Alps, 24 h RMSE | 1.89 °C | 1.88 °C |
+| 500 hPa height, Western Europe, 120 h ACC | 0.875 | 0.909 |
+| Mean sea level pressure, Western Europe, 24 h RMSE | 0.81 hPa | 0.58 hPa |
+
+![GFS vs ECMWF skill against lead time](docs/figures/skill_vs_lead_t2m_western_europe.png)
+
+*2 m temperature over Western Europe: centred ACC, RMSE and bias against lead time for GFS and ECMWF on the same 1,926 runs (2024-02 → 2026-09). The dotted line is ACC = 0.6.*
+
+ECMWF's advantage in 2 m temperature over Western Europe largely disappears in the Alps.
+
+![Map of GFS minus ECMWF RMSE at 24 h](docs/figures/rmse_diff_t2m_europe_24h.png)
+
+*Grid-point 24 h RMSE of GFS minus that of ECMWF for 2 m temperature, over the paired runs (map years 2024–2026; ECMWF data starts 2024-02 and ends 2026-09). Green: ECMWF more accurate; purple: GFS more accurate. The black box is the European Alps region.*
+
+**GFS skill through time, 2016 vs 2025** (24 h, each year ~730 runs)
+
+| | 2016 | 2025 |
+|---|---|---|
+| 2 m temperature RMSE, Western Europe | 1.50 °C | 1.38 °C |
+| 2 m temperature ACC, Western Europe | 0.81 | 0.84 |
+| 2 m temperature RMSE, European Alps | 2.41 °C | 1.85 °C |
+| 500 hPa height RMSE, Western Europe | 8.1 m | 6.7 m |
+| 500 hPa height RMSE, European Alps | 8.7 m | 5.6 m |
+
+Not every score improved: in the Rockies the 24 h RMSE of 500 hPa height (7.8 → 8.9 m) and 10 m wind speed (1.47 → 1.73 m/s) is higher in 2025. These are single years, so year-to-year variability is not separated from model change, and GFS upgrades v14, v15 and v16 all fall in the 2017–2021 gap, so no difference can be attributed to a specific upgrade.
+
+---
+
+## Caveats
+
+- **ERA5 is produced by ECMWF** with a version of the IFS model, which favours ECMWF in the head-to-head comparison.
+- **Terrain mismatch.** At 0.25° each model and ERA5 represent mountains at different heights, so part of the error in mountain regions reflects terrain representation, not forecast error.
+- **Model upgrades.** Known GFS and ECMWF upgrade dates are marked on time-based views; skill changes across them may reflect the model change.
+- **ERA5 precipitation and snow** are weaker truth than ERA5 temperature or pressure, especially in complex terrain.
+- The last few months of ERA5 are preliminary (ERA5T) and can be revised; the dashboard flags this.
+
+---
+
+## Data integrity and method notes
+
+- **The archive server sometimes returned the wrong data.** Under concurrent load, the NCAR server used for the 2016 GFS backfill occasionally answered one request with another's data, sometimes with correct labels. Every response is checked against its request and a plausible range, and every 2016 field was fetched a second time and compared: 43,872 fields, 4 stored fields found wrong and replaced. Checking labels alone would not have caught them.
+- **Freezing level needed a symmetric mask.** The first version excluded points only where ERA5 had no freezing level above the ground, which left GFS's below-ground values in the sample and inflated the error in cold regions. The fix excludes a point if *either* source puts the freezing level at or below its own surface, and uses the GFS highest tropospheric freezing level rather than the 0 °C isotherm (in inversions the two differ). With the fix, the European Alps 24 h RMSE over 2021–2026 fell from 346 m to 188 m.
+- **ERA5 snow over glaciers is not usable as truth.** ERA5 holds 0.16–10 m of water equivalent on glacier cells all summer. Cells whose August–September minimum stays at or above 10 mm in every year 2015–2026 are masked (139 cells, all in western North America, none in Europe).
+
+Full decisions, checks and open issues are recorded in [`SPEC.md`](SPEC.md).
+
+---
+
+## Dashboard
+
+- **Selectors:** model (GFS, ECMWF, or GFS vs ECMWF), variable, domain, region, precipitation threshold.
+- **Selected window:** skill curves against lead time, metric cards, and a grid-point map (bias, RMSE, ACC, or frequency bias / ETS) for any range of months. In comparison mode the map shows differences between the models.
+- **Skill through time:** two years side by side (default 2016 vs 2025), a difference map, and a year-by-year chart at one lead time with model-version markers and the record gap shown.
+- Maps for a month window use the whole years it covers; the dashboard says so.
+
+---
+
+## Running locally
+
+Requires Python 3.14 (the version the requirements are pinned for).
 
 ```bash
 git clone https://github.com/zadams03/wx-verify.git
 cd wx-verify
-
 python -m venv venv
-# Windows
-venv\Scripts\activate
-# macOS / Linux
-source venv/bin/activate
-```
-
-### 2. Install dependencies
-
-```bash
+source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-```
-
-### 3. Configure the CDS API key (ERA5 access)
-
-1. Register at [https://cds.climate.copernicus.eu](https://cds.climate.copernicus.eu)
-2. Follow the [API setup guide](https://cds.climate.copernicus.eu/how-to-api) to obtain your key
-3. Create a `.cdsapirc` file in your home directory:
-
-```ini
-url: https://cds.climate.copernicus.eu/api
-key: YOUR-API-KEY-HERE
-```
-
-### 4. Configure the run parameters
-
-Edit `config.yaml` to set the date range and domain. The defaults cover Western Europe (35°N–65°N, 15°W–25°E) for 2023–2024.
-
-```yaml
-date_range:
-  start: "2023-01-01"
-  end:   "2024-12-31"
-```
-
-### 5. Run the data pipeline
-
-Each step caches its output — already-downloaded files are skipped on re-runs.
-
-**Step 1 — Fetch ERA5 reanalysis** (requires CDS API key; may take several hours for long date ranges):
-
-```python
-from src.utils.config import load_config
-from src.data.era5_fetcher import fetch_era5_range
-
-config = load_config()
-fetch_era5_range(config)   # downloads one NetCDF per month to data/raw/era5/
-```
-
-**Step 2 — Fetch GFS forecasts** (public AWS archive, no key needed):
-
-```python
-from src.data.gfs_fetcher import GFSFetcher
-
-fetcher = GFSFetcher(config)
-fetcher.fetch_range()   # downloads GRIB2 files to data/raw/gfs/
-```
-
-**Step 3 — Align and compute metrics:**
-
-```python
-from src.data.era5_fetcher import load_era5
-from src.processing.alignment import align, save_aligned
-from src.processing.climatology import compute_climatology, save_climatology
-from src.processing.metrics import run_metrics, compute_summary, save_summary
-import xarray as xr
-
-# Load ERA5 for all months in your date range
-era5_months = [load_era5(config, y, m) for y, m in your_year_month_list]
-era5_full = xr.concat(era5_months, dim="time")
-
-# Compute monthly climatology (baseline for ACC)
-clim = compute_climatology(era5_months)
-save_climatology(clim)
-
-# Load GFS and align with ERA5
-gfs = fetcher.load(your_date_list)
-forecast, obs = align(gfs, era5_full, config)
-save_aligned(forecast, obs, label="full_run")
-
-# Compute and save metrics
-metrics = run_metrics(forecast, obs, clim, output_dir="data/processed/metrics")
-save_summary(compute_summary(metrics), output_dir="data/processed/metrics")
-```
-
-### 6. Launch the dashboard
-
-```bash
 streamlit run dashboard/app.py
 ```
 
-Open [http://localhost:8501](http://localhost:8501) in your browser.
+The dashboard reads only the committed tables in `data/dashboard/` and downloads map files from the GitHub Release on first use, so no credentials are needed to view it.
 
----
-
-## Dashboard Features
-
-- **Skill curves** — ACC, RMSE, and Bias plotted against forecast lead time on a logarithmic axis. The ACC = 0.6 skill threshold is marked. Charts update when a different region is selected.
-- **Spatial maps** — Geographic distribution of each metric across Western Europe, togglable between RMSE, Bias, and ACC views. The selected region is highlighted on the map.
-- **Metric cards** — Summary numbers for the selected lead time, with the skill threshold card turning green (above 0.6) or red (below).
-- **Region selector** — Six preset regions: Western Europe (full domain), UK & Ireland, Scandinavia, Mediterranean, Central Europe, Iberian Peninsula. All charts and cards update on region change.
-
----
-
-## Running the Tests
-
-Unit tests require no data files:
+**Rebuilding the data** needs a free [Copernicus Climate Data Store](https://cds.climate.copernicus.eu) account with an API key in `~/.cdsapirc` (for ERA5). GFS and ECMWF data need no key. The pipeline is resumable and skips months already aggregated:
 
 ```bash
-pytest tests/test_metrics.py -v
+python -m src.pipeline --variable t2m --domain europe --start 2024-01 --end 2024-03
 ```
 
-Integration tests require data from the pipeline steps above:
+Options: `--model`, `--variable`, `--domain`, `--start`, `--end`, `--keep-raw`, `--force`, `--no-tables`, `--tables-only`. With no options it runs every enabled model, variable and domain in `config.yaml`.
+
+**Tests:**
 
 ```bash
-pytest tests/ -v -m integration -s
+pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+Integration tests skip when CDS credentials or raw data are absent.
+
+**README figures** are regenerated from the committed data with `python scripts/make_readme_figures.py` (needs `requirements-dev.txt` and a locally installed Chrome or Chromium, which kaleido uses for image export).
+
+---
+
+## Repository layout
+
+```
+config.yaml          all run parameters: models, sources, variables, domains, regions, lead times
+src/data/            fetchers (GFS AWS, GFS NCAR, ECMWF, ERA5), variable registry, map hosting
+src/processing/      alignment, climatology, metrics, precipitation scores, aggregation, pairing, tables
+src/viz/             skill curves, maps, dashboard components, shared dashboard data loaders
+src/pipeline.py      resumable pipeline CLI
+dashboard/app.py     Streamlit app
+data/dashboard/      committed region and coverage tables, map manifest
+data/static/         ERA5 permanent-snow masks
+scripts/             map publishing, snow mask, raw-data verification, outlier scan, README figures
+docs/figures/        README figures
+tests/
+SPEC.md              specification, decisions and issue log
 ```
 
 ---
 
-## Future Work
+## Data sources
 
-- Head-to-head GFS vs ECMWF skill comparison
-- Additional variables: 10m wind speed, 500 hPa geopotential height
-- Seasonal skill breakdown (winter vs summer performance)
-- Ensemble verification: spread–skill relationship
-- Extended domain: North Atlantic, North America
-
----
-
-## Technical Stack
-
-Python · xarray · pandas · numpy · scipy · Plotly · Streamlit · cfgrib · cdsapi
+| Data | Source |
+|---|---|
+| GFS 2021–2026 | NOAA GFS on AWS (`noaa-gfs-bdp-pds`), byte-range downloads via the `.idx` files |
+| GFS 2016 | NSF NCAR GDEX, *NCEP GFS 0.25 Degree Global Forecast Grids Historical Archive* (d084001, [doi:10.5065/D65D8PWK](https://doi.org/10.5065/D65D8PWK)), via the THREDDS NetCDF Subset Service |
+| ECMWF IFS HRES | ECMWF open data, AWS mirror (`ecmwf-forecasts`), CC BY 4.0 |
+| ERA5 | Copernicus Climate Change Service, Climate Data Store (hourly data and monthly means by hour of day) |
 
 ---
 
-*wx-verify · v1.0 · May 2026*
+## About
+
+Built by Zac Adams. The code was written with Claude Code; I designed, specified, directed and verified the project.

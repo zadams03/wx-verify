@@ -22,10 +22,9 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from src.data.map_store import MapUnavailable, get_map_file
+from src.data.map_store import MapUnavailable
 from src.processing.categorical import categorical_metrics, map_scores
-from src.processing.metrics import combine_stats, map_metrics, masked_fraction, region_metrics
-from src.utils import paths
+from src.processing.metrics import map_metrics, masked_fraction
 from src.utils.config import comparison_models, load_config
 from src.viz.components import (
     CENTRED_ACC_NOTE,
@@ -60,6 +59,15 @@ from src.viz.skill_curves import (
     build_skill_by_year,
     build_skill_curves,
 )
+from src.viz.dashboard_data import (
+    difference_map,
+    load_categorical_table,
+    load_coverage,
+    load_map_stats,
+    load_region_table,
+    paired_run_count,
+    region_summary,
+)
 from src.viz.spatial_maps import build_spatial_map, zoom_bounds
 
 _ERA5T_WINDOW_DAYS = 100   # ERA5 is preliminary (ERA5T) for roughly the latest 3 months
@@ -71,53 +79,23 @@ _ERA5T_WINDOW_DAYS = 100   # ERA5 is preliminary (ERA5T) for roughly the latest 
 
 @st.cache_data
 def _load_region_table() -> pd.DataFrame | None:
-    """All rows; ``comparison`` is "" for a model's own statistics, else the comparison name."""
-    path = paths.dashboard_dir() / "region_monthly.parquet"
-    if not path.exists():
-        return None
-    df = pd.read_parquet(path)
-    if "comparison" not in df:
-        df["comparison"] = ""
-    for col in ("comparison", "model", "variable", "domain", "region", "month"):
-        df[col] = df[col].astype(str)
-    return df
+    return load_region_table()
 
 
 @st.cache_data
 def _load_categorical_table() -> pd.DataFrame | None:
-    """Weighted contingency counts (precipitation), same ``comparison`` convention as the region table."""
-    path = paths.dashboard_dir() / "region_categorical.parquet"
-    if not path.exists():
-        return None
-    df = pd.read_parquet(path)
-    for col in ("comparison", "model", "variable", "domain", "region", "month"):
-        df[col] = df[col].astype(str)
-    return df
+    return load_categorical_table()
 
 
 @st.cache_data
 def _load_coverage() -> pd.DataFrame | None:
-    path = paths.dashboard_dir() / "coverage.parquet"
-    if not path.exists():
-        return None
-    df = pd.read_parquet(path)
-    if "comparison" not in df:
-        df["comparison"] = ""
-    return df
+    return load_coverage()
 
 
 @st.cache_data
 def _load_map_stats(model: str, variable: str, domain: str, years: tuple[int, ...],
                     comparison: str = "") -> xr.Dataset | None:
-    """Sum the yearly map files for ``years`` (sufficient statistics add exactly).
-    For a comparison, a year without its own paired map uses the standalone one."""
-    parts = []
-    for y in years:
-        f = get_map_file(model, variable, domain, y, comparison or None)
-        if f is not None:
-            with xr.open_dataset(f) as ds:
-                parts.append(ds.load().astype("float64"))
-    return combine_stats(parts) if parts else None
+    return load_map_stats(model, variable, domain, years, comparison)
 
 
 def _precip_map_figure(stats, pair, model, map_view, threshold, lead_time_h, region_bounds, region_name, units,
@@ -276,12 +254,15 @@ def _cov(model_key: str, comp: str, in_months: list[str] | None = None) -> pd.Da
              & (c.domain == domain) & c.month.isin(window if in_months is None else in_months)]
 
 
+def _runs(model_key: str, comp: str, in_months: list[str] | None = None) -> int:
+    c = paired_coverage if comp else coverage
+    return paired_run_count(c, model_key, comp, variable, domain, window if in_months is None else in_months)
+
+
 def _scores(m: str, in_months: list[str]) -> pd.DataFrame:
     """One row per lead time for model ``m`` pooled over ``in_months``: bias, RMSE and ACC — or for
     precipitation frequency bias, ETS and event frequency at the chosen threshold plus the mean bias."""
-    rows = source[(source.model == m) & (source.variable == variable) & (source.domain == domain)
-                  & (source.region == region_name) & source.month.isin(in_months)]
-    summary = region_metrics(rows)
+    summary = region_summary(source, m, variable, domain, region_name, in_months)
     if not precip:
         return summary
     cat_src = all_categorical[all_categorical.comparison == comparison]
@@ -324,7 +305,7 @@ if view_mode == "time":
         st.stop()
     for y in (a, b):
         first, last = date.fromisoformat(in_year[y][0] + "-01"), pd.Period(in_year[y][-1], "M").end_time.date()
-        runs = {m: int(_cov(m, comparison, in_year[y]).n_runs_included.sum()) for m in shown}
+        runs = {m: _runs(m, comparison, in_year[y]) for m in shown}
         st.caption(
             f"**{y}** — {len(in_year[y])} months ({in_year[y][0]} to {in_year[y][-1]}), "
             + ", ".join(f"{runs[m]:,} {m.upper()} runs" for m in shown) + " verified. Model versions: "
@@ -407,8 +388,8 @@ if view_mode == "time":
 # ---------------------------------------------------------------------------
 
 if comparison:
-    paired_runs = int(_cov(pair[0], comparison).n_runs_included.sum())
-    own = {m: int(_cov(m, "").n_runs_included.sum()) for m in pair}
+    paired_runs = _runs(pair[0], comparison)
+    own = {m: _runs(m, "") for m in pair}
     st.title(f"wx-verify — {_model_label(comparison)} {long_name} Verification")
     st.caption(f"{_model_label(comparison)} | 0.25° | {long_name} | ERA5 verification | {region_name}")
     st.caption(
@@ -514,13 +495,9 @@ with col_right:
         if all(v is not None for v in stats.values()):
             a_name, b_name = (m.upper() for m in pair)
             if map_view in ("rmse_diff", "acc_diff"):
-                a_metrics, b_metrics = (map_metrics(stats[m]) for m in pair)
-                if map_view == "rmse_diff":
-                    da, name = a_metrics["rmse"] - b_metrics["rmse"], f"RMSE {a_name} − {b_name}"
-                else:
-                    da, name = b_metrics["acc"] - a_metrics["acc"], f"ACC {b_name} − {a_name}"
+                da, name, note = difference_map(stats[pair[0]], stats[pair[1]], a_name, b_name, map_view)
                 map_fig = build_spatial_map(da, map_view, lead_time_h, region_bounds, region_name, units, view,
-                                            title=name, colorbar_note=f"+ = {b_name} more accurate",
+                                            title=name, colorbar_note=note,
                                             variable=variable)
             else:
                 which = pair[0] if map_view == "bias:a" else pair[1]
