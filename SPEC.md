@@ -1,7 +1,18 @@
 # wx-verify
 ## NWP Forecast Verification Dashboard
-**Technical Project Specification · Version 1.2 — v1.1 complete, Phases 8–12 planned · October 2026**
+**Technical Project Specification · Version 2.0 — v2.0 complete · October 2026**
 Personal Research Project · GitHub: github.com/zadams03/wx-verify
+
+---
+
+## Status (12 Oct 2026)
+
+- **Released: v2.0** (tag `v2.0`, commit `5f66090`). Phases 1–12 complete; live at https://wx-verify-uvv947uunr9zlvzg6bp5mx.streamlit.app/.
+- **Built:** GFS and ECMWF IFS HRES verified against ERA5 for seven variables, two domains (`europe`, `north_america_west`) and eleven regions; GFS vs ECMWF paired comparison; skill-through-time view; README with figures.
+- **Record:** GFS 2016 and 2021-03 → 2026-09 (gap 2017-01 → 2021-02; swe from 2021-03-23); ECMWF 2024-02 → 2026-09.
+- **Data:** committed dashboard tables 2.7 MB; maps on release `maps-20261012` (136 files, 206 MB).
+- **Tests:** 367 passed, 1 skipped.
+- **Open issues:** 013, 016, 020, 021, 022 (Section 6). **Possible next work:** Section 7.
 
 ---
 
@@ -41,7 +52,7 @@ This project is explicitly a learning exercise in parallel with a portfolio deli
 
 ## 3. Scientific Scope
 
-*v1.0 scope was T2m, GFS only, Western Europe. The v2 scope below is delivered by Phases 8–12.*
+*v1.0 scope was T2m, GFS only, Western Europe. The v2 scope below was delivered by Phases 8–12 (v2.0).*
 
 ### 3.1 Variables
 | Variable | Key | Units | Models | Scores | Phase |
@@ -201,13 +212,15 @@ wx-verify/
 ├── notebooks/
 │   └── exploration.ipynb      ← Scratch space — not part of dashboard
 │
-└── tests/                     ← test_config, test_metrics, test_processing, test_pipeline,
-                                 test_gfs_retry, test_viz, test_integration (skips without credentials/data)
+└── tests/                     ← 19 modules: config, metrics, processing, pipeline, pairing, fetchers (GFS retry,
+                                 GFS NCAR, ECMWF, ERA5 jobs), map store, snow mask, phase 10/11 variables,
+                                 viz, dashboard (standard, precip, time, shared data), test_integration
+                                 (marked `integration`; skips without CDS credentials or raw data)
 ```
 
 ### 4.2 Config System
 
-All run parameters live in `config.yaml`. Nothing is hardcoded in source files. v2 schema (Phase 8 introduces it with only `t2m`, `gfs`, `europe` enabled; later phases enable entries):
+All run parameters live in `config.yaml`. Nothing is hardcoded in source files. Current file (v2.0):
 
 ```yaml
 runs: ["00", "12"]
@@ -219,44 +232,52 @@ models:
     enabled: true
     sources:
       - {name: aws,  start: "2021-03-23", end: "2026-09-20"}
-      - {name: ncar, start: "2015-01-15", end: "2021-03-22"}   # Phase 12 (2016 built; run scope set by --start/--end)
+      - {name: ncar, start: "2015-01-15", end: "2021-03-22"}   # Phase 12: NCAR d084001 via THREDDS NCSS
   ecmwf:
-    enabled: false              # Phase 9
+    enabled: true               # Phase 9
     sources:
       - {name: aws,  start: "2024-02-01", end: "2026-09-20"}
 
 model_versions:                 # vertical markers on time-based views
   gfs:   [{name: "v12", date: "2015-01-14"}, {name: "v13", date: "2016-05-11"}, {name: "v14", date: "2017-07-19"},
-          {name: "v15", date: "2019-06-12"}, {name: "v16", date: "2021-03-22"}]
+          {name: "v15", date: "2019-06-12"}, {name: "v16", date: "2021-03-22"}]   # first run affected: 12z each from v13 (v12: EMC gives the day only)
   ecmwf: [{name: "49r1", date: "2024-11-12"}, {name: "50r1", date: "2026-05-12"}]
 
 variables:
-  t2m:  {long_name: "2m Temperature", units: "°C",  scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: true}
-  msl:  {long_name: "Mean sea level pressure", units: "hPa", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: false}
-  z500: {long_name: "500 hPa geopotential height", units: "m", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: false}
-  ws10: {long_name: "10m wind speed", units: "m/s", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: false}
-  frzl: {long_name: "Freezing level", units: "m", scores: [bias, rmse], models: [gfs], enabled: false}
-  tp24: {long_name: "24h precipitation", units: "mm", scores: [freq_bias, ets, bias], thresholds: [1, 5, 10], models: [gfs, ecmwf], enabled: false}
-  swe:  {long_name: "Snow water equivalent", units: "mm", scores: [bias, rmse], models: [gfs], enabled: true, start: "2021-03-23"}   # optional start: the variable's first init date
+  t2m:  {long_name: "2m Temperature", units: "°C", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: true}
+  msl:  {long_name: "Mean sea level pressure", units: "hPa", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: true}
+  z500: {long_name: "500 hPa geopotential height", units: "m", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: true}
+  ws10: {long_name: "10m wind speed", units: "m/s", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: true}
+  frzl: {long_name: "Freezing level", units: "m", scores: [bias, rmse], models: [gfs], enabled: true}
+  tp24: {long_name: "24h precipitation", units: "mm", scores: [freq_bias, ets, bias], thresholds: [1, 5, 10], models: [gfs, ecmwf], enabled: true}
+  swe:  {long_name: "Snow water equivalent", units: "mm", scores: [bias, rmse], models: [gfs], enabled: true, start: "2021-03-23"}   # ECMWF parked: open data has sd only from 2025-11-20; not backfilled (GFS WEASD over sea changes with version)
 
 domains:
   europe:
     bounds: {lat_min: 35, lat_max: 72, lon_min: -15, lon_max: 35}
     enabled: true
     regions:
-      "Western Europe": {lat_min: 35, lat_max: 65, lon_min: -15, lon_max: 25}
-      "European Alps":  {lat_min: 43.5, lat_max: 48.5, lon_min: 5, lon_max: 16.5, mountain: true}   # mountain: true shows the terrain caveat
-      # ... remaining presets as Section 3.4
+      "Western Europe":    {lat_min: 35,   lat_max: 65, lon_min: -15, lon_max: 25}
+      "UK & Ireland":      {lat_min: 50,   lat_max: 59, lon_min: -10, lon_max: 2}
+      "Scandinavia":       {lat_min: 55,   lat_max: 65, lon_min: 5,   lon_max: 25}
+      "Mediterranean":     {lat_min: 36,   lat_max: 46, lon_min: -5,  lon_max: 28}
+      "Central Europe":    {lat_min: 46,   lat_max: 55, lon_min: 8,   lon_max: 20}
+      "Iberian Peninsula": {lat_min: 36,   lat_max: 44, lon_min: -9,  lon_max: 3}
+      "European Alps":     {lat_min: 43.5, lat_max: 48.5, lon_min: 5, lon_max: 16.5, mountain: true}
+      "Norwegian Mountains": {lat_min: 58, lat_max: 71, lon_min: 5,   lon_max: 31, mountain: true}
   north_america_west:
     bounds: {lat_min: 36, lat_max: 62, lon_min: -140, lon_max: -102}
-    enabled: false              # Phase 10
-    regions: {}                 # as Section 3.4
+    enabled: true
+    regions:
+      "Pacific Northwest": {lat_min: 42, lat_max: 49, lon_min: -125, lon_max: -116, mountain: true}
+      "Western Canada":    {lat_min: 49, lat_max: 60, lon_min: -135, lon_max: -110, mountain: true}
+      "Rockies":           {lat_min: 37, lat_max: 55, lon_min: -120, lon_max: -104, mountain: true}
 
 climatology: {source: era5_monthly_by_hour, period: [1991, 2020]}
 dashboard:
   map_resolution: 0.25
   committed_size_budget_mb: 150
-  maps_release_tag: maps-20261012     # GitHub Release holding data/dashboard/maps (maps-YYYYMMDD, letter suffix for a second release that day)
+  maps_release_tag: maps-20261012     # GitHub Release holding data/dashboard/maps (scripts/publish_maps.sh)
   maps_repo: zadams03/wx-verify
 ```
 
@@ -273,10 +294,10 @@ Per-variable source mappings (GRIB short names, CDS names, unit conversions) liv
 | Metrics | numpy, scipy | Skill score computation |
 | Visualisation | plotly | Interactive charts |
 | Dashboard | Streamlit | Simple, professional, free deployment |
-| Maps | plotly (choropleth) | Spatial error maps |
+| Maps | plotly (Scattergeo, one marker per 0.25° cell) | Spatial error maps |
 | Version control | Git / GitHub | Source of truth |
 | Environment | Python venv | Reproducible dependencies |
-| IDE | VS Code | Windows and macOS (Apple Silicon); Claude Code compatible |
+| IDE | VS Code | macOS (Apple Silicon); Claude Code compatible |
 | Dev dependencies | requirements-dev.txt (pytest, kaleido) | Kept out of the deployment requirements; kaleido exports the README figures |
 
 ### 4.4 Data Storage Design (from Phase 8)
@@ -296,125 +317,10 @@ Consequences:
 
 ## 5. Build Phases
 
-### Phase 1 — Project Foundations & Environment
-*Goal: clean repo, working environment, config system, directory structure in place before a single line of science is written.*
+### Phases 1–7 — v1.0 (May 2026), steps 1–47 ✓
+Repository, config loader, ERA5 (CDS) and GFS (AWS byte-range) fetchers, alignment, monthly climatology, bias/RMSE/ACC, Streamlit dashboard (skill curves, Scattergeo maps, metric cards, region presets), deployment to Streamlit Community Cloud, v1.0 README. Scope: GFS T2m, Western Europe. Refinements after v1.0: date picker, intermediate gridlines, region-box rendering, layout.
 
-**Learning checkpoint before starting:** Read up on — Python virtual environments and why they matter; xarray as a data structure (think of it as pandas for gridded data with named dimensions).
-
-Build steps:
-1. Initialise Git repo, create GitHub remote, push initial commit
-2. Create full directory structure as per Section 4.1
-3. Set up Python virtual environment, create `requirements.txt` with all dependencies
-4. Write `config.yaml` with full parameter set from Section 4.2
-5. Write config loader utility in `src/utils/config.py` — loads yaml, validates required keys, returns typed config object
-6. Write `README.md` — project title, what it does, setup instructions placeholder
-7. Write `.gitignore` — exclude `data/raw/`, `data/processed/`, `.env`, `__pycache__`, venv
-8. Commit: "Phase 1 complete — project foundations"
-
----
-
-### Phase 2 — ERA5 Data Acquisition
-*Goal: reliable, cached ERA5 reanalysis data for the configured domain and date range.*
-
-**Learning checkpoint before starting:** Read up on — what ERA5 reanalysis is and how it differs from raw observations; the Copernicus Climate Data Store and how to register for API access; NetCDF file format and how xarray reads it.
-
-**Pre-requisite:** Register at https://cds.climate.copernicus.eu and follow setup instructions to configure the CDS API key on your machine.
-
-Build steps:
-9. Write `src/data/era5_fetcher.py` — uses `cdsapi` to download ERA5 T2m for configured domain, date range, and hours. Saves as NetCDF to `data/raw/era5/`
-10. Implement caching check — skip download if file already exists locally
-11. Write data validation function — checks downloaded file has expected dimensions (time, latitude, longitude), expected date coverage, no all-NaN slices
-12. Write loader function — opens cached NetCDF with xarray, subsets to configured domain, returns clean DataArray
-13. Test: fetch one month of ERA5 T2m, confirm dimensions and units correct
-14. Commit: "Phase 2 complete — ERA5 data acquisition"
-
----
-
-### Phase 3 — GFS Forecast Acquisition
-*Goal: reliable, cached GFS forecast archive data for multiple lead times.*
-
-**Learning checkpoint before starting:** Read up on — how GFS archives are structured on NOAA servers; what GRIB2 format is; forecast initialisation time vs valid time and why the distinction matters.
-
-Build steps:
-15. Write `src/data/base_fetcher.py` — abstract base class defining the interface all model fetchers must implement (fetch, validate, load). This is the extensibility hook for future models.
-16. Write `src/data/gfs_fetcher.py` extending base_fetcher — downloads GFS 0.25° T2m forecasts from NOAA NOMADS archive for configured lead times and date range. Saves as GRIB2 to `data/raw/gfs/`
-17. Implement caching check — skip download if file already exists
-18. Write GRIB2 parser using `cfgrib` — extracts T2m at each lead time, converts to xarray DataArray with dimensions (init_time, lead_time, latitude, longitude)
-19. Write data validation — checks expected lead times present, spatial coverage correct, units in Kelvin (convert to Celsius)
-20. Test: fetch one week of GFS forecasts at all configured lead times, confirm structure
-21. Commit: "Phase 3 complete — GFS forecast acquisition"
-
----
-
-### Phase 4 — Data Alignment & Processing
-*Goal: forecast and reanalysis data on a common grid and timeline, ready for metric computation.*
-
-**Learning checkpoint before starting:** Read up on — bilinear interpolation for regridding; what it means to verify a forecast at its "valid time"; why spatial averaging matters when comparing gridded data.
-
-Build steps:
-22. Write `src/processing/alignment.py` — interpolates GFS forecasts onto ERA5 grid using xarray/scipy interpolation. Aligns on valid time (not initialisation time). Outputs matched forecast/observation pairs.
-23. Write `src/processing/climatology.py` — computes T2m climatological mean for each grid point and calendar month from the ERA5 record. Used as baseline for ACC. Saves to `data/processed/`
-24. Write anomaly computation — subtracts climatological mean from both forecast and ERA5 fields to produce anomaly fields
-25. Write aligned data validator — confirms forecast and ERA5 arrays have identical dimensions, coordinate systems, and time coverage before metrics are computed
-26. Test: run alignment on one month, spot-check a grid point manually
-27. Commit: "Phase 4 complete — data alignment"
-
----
-
-### Phase 5 — Skill Metrics
-*Goal: RMSE, bias, and ACC computed across all lead times and stored as clean output files.*
-
-**Learning checkpoint before starting:** Read up on — the mathematical definitions of RMSE, bias, and ACC; why ACC of 0.6 is the conventional skill threshold; why squaring errors in RMSE penalises large errors more heavily.
-
-Build steps:
-28. Write `src/processing/metrics.py` — implements three functions:
-    - `compute_bias(forecast, obs)` — mean signed error
-    - `compute_rmse(forecast, obs)` — root mean square error
-    - `compute_acc(forecast_anom, obs_anom)` — anomaly correlation coefficient
-    All functions accept xarray DataArrays, return DataArrays preserving spatial dimensions
-29. Write metrics runner — iterates over all lead times, computes all three metrics at each, saves results to `data/processed/metrics/` as NetCDF
-30. Write summary statistics — computes domain-mean metric values at each lead time (single number per lead time per metric) and saves as CSV for dashboard use
-31. Write unit tests in `tests/test_metrics.py` — test each metric function against hand-computed known values
-32. Test: run full metrics pipeline on two months of data, inspect output files
-33. Commit: "Phase 5 complete — skill metrics"
-
----
-
-### Phase 6 — Streamlit Dashboard
-*Goal: interactive dashboard presenting all verification results clearly and professionally.*
-
-**Learning checkpoint before starting:** Read up on — how Streamlit works (it reruns the script on every interaction); Plotly for interactive charts; what makes a good scientific visualisation.
-
-Build steps:
-34. Write `dashboard/app.py` — Streamlit entry point. Loads config and all processed metric files. Sidebar controls for date range, lead time selection, metric selection.
-35. Write `src/viz/skill_curves.py` — Plotly line chart of domain-mean RMSE, ACC, and Bias vs lead time. X-axis logarithmic. Gridlines every 24h, labelled at data points only (24h, 48h, 72h, 120h, 240h). ACC=0.6 skill threshold reference line included. Chart updates based on selected region from sidebar.
-36. Write `src/viz/spatial_maps.py` — Plotly choropleth map of Western Europe with three toggle views: RMSE (YlOrRd colour scale), Bias (diverging blue-white-red, blue=too cold, red=too warm), and ACC skill (green=above 0.6 threshold, red=below). Selected region highlighted on map. Colour scale legend updates with each toggle.
-37. Write `src/viz/components.py` — reusable Streamlit components: metric summary cards (ACC, RMSE, Bias, skill threshold above/below with colour coding), lead time selector buttons, date range slider, and region selector dropdown with presets: Western Europe (full domain), UK & Ireland, Scandinavia, Mediterranean, Central Europe, Iberian Peninsula. All metric cards and skill curves update when region changes.
-38. Wire all components into `app.py` — full dashboard with: skill curves panel, spatial map panel, metric summary cards, sidebar controls
-39. Test: run dashboard locally (`streamlit run dashboard/app.py`), verify all charts render correctly and controls update plots
-40. Style pass — consistent colour scheme, axis formatting, hover labels, chart titles
-41. Commit: "Phase 6 complete — dashboard"
-    - Note: Scattergeo used instead of choropleth for spatial map — correct technical choice at 0.25° gridded resolution.
-
----
-
-### Phase 7 — Deployment & Documentation
-*Goal: publicly accessible dashboard, clean GitHub repo, professional README.*
-
-Build steps:
-42. Write full `README.md` — project overview, scientific methodology, data sources, setup instructions, how to run locally, link to live dashboard. Written to be readable by a meteorology admissions reader. ✓ Complete
-43. Clean `requirements.txt` — verify all dependencies pinned to specific versions ✓ Complete (updated for Python 3.14 in May 2026)
-44. Deploy to Streamlit Community Cloud — connect GitHub repo, set secrets for CDS API key, verify live deployment. ✓ Complete — live at https://wx-verify-uvv947uunr9zlvzg6bp5mx.streamlit.app/
-45. Full codebase cleanup — remove dead code, unused imports, debug print statements ✓ Complete (build-phase step comments removed; no dead code or unused imports found)
-46. Spec vs build audit — verify SPEC.md accurately reflects what was actually built. Update any divergences. ✓ Complete — divergences noted below
-47. Final commit: "Phase 7 complete — wx-verify v1.0" ✓ Complete
-
-**Phase 7 build divergences (step 46 audit):**
-- Step 36 spec says "choropleth map" — implemented as `go.Scattergeo` (one marker per 0.25° grid cell) rather than a true choropleth. Scattergeo is the standard approach for continuous gridded data in Plotly and produces an equivalent visual result. A true choropleth would require a GeoJSON polygon per grid cell (~19,200 polygons), which is impractical at this resolution.
-- Step 37 spec says "date range slider" — implemented as a static date range display (config values). The pipeline produces a single set of metrics over the full configured period; a time-slicing slider requires sub-period metric files that the current pipeline does not generate. Parked for a future enhancement.
-- Phase 6 files were first committed in the style-pass commit (step 40) rather than at step 41, because the requirements-fix session intervened before the Phase 6 commit was made.
-
-**v1.0 data coverage (found Oct 2026):** the deployed v1.0/v1.1 metrics were computed from 28 GFS runs, 1–7 January 2023, and the ACC climatology was the January 2023 mean only. The dashboard did not state this. Phase 8 replaces both.
+Found in Oct 2026: the deployed v1.0/v1.1 metrics used 28 GFS runs (1–7 January 2023) and a January-2023-only climatology, which the dashboard did not state. Phase 8 replaced both and retired the v1 files and recompute path; Phase 7's README was replaced at v2.0.
 
 ---
 
@@ -633,20 +539,15 @@ Build steps:
 | Ensemble verification | GFS ensemble spread/skill relationship. Requires ensemble archive access. |
 | Seasonal breakdown | Skill scores stratified by season — winter vs summer performance differences. |
 | Regional sub-selection | User draws a custom bounding box on the map to define an arbitrary region for metric computation. Requires interactive map selection. |
-| Additional domains | Japan and South America (Andes) — config-only after Phase 10. |
+| Longer GFS record | Backfill 2017–2020 (and 2015) from NCAR with the Phase 12 code; run `scripts/verify_raw.py` on every year (Issue 021). |
+| Additional domains | Japan and South America (Andes) — config entries plus downloads for the new domain. |
 | Project 2 hook | Statistical downscaling layer — if pursued, this repo extends into a later phase. Decision made in Claude.ai before any code is written. |
 | Date range pipeline trigger | Trigger new ERA5/GFS fetch from dashboard for a different date range. Level 3 feature. |
-| Cloud data hosting | Host dashboard data on cloud storage rather than in git. Fallback if the committed size budget (4.4) is exceeded. |
 
 ---
 
 ## 8. Refinement Items
-*Known UI/UX improvements identified post-v1.0. Address in a dedicated refinement session before adding new features.*
-
-- Interactive date range selector in sidebar — allow user to select a custom analysis period without editing config. ✓ Resolved — date range picker added to sidebar (`render_date_range_selector` in `components.py`). When a sub-period is selected, `_recompute_spatial_for_window()` in `app.py` filters the aligned forecast/obs data by init_time and recomputes bias, RMSE, and ACC spatial maps on the fly; skill curves, metric cards, and the spatial map all update. Falls back to pre-computed metric files when the full period is selected. Warning shown if fewer than 4 forecast runs are in the selected window.
-- Intermediate gridlines on skill curves x-axis — add minor gridlines between the 5 labelled data points for easier reading. ✓ Resolved — intermediate gridlines at 96h, 144h, 168h, 192h, 216h added as lighter shapes (width 0.5, opacity ~0.12) in `src/viz/skill_curves.py`; data-point gridlines unchanged.
-- Map trapezoidal border fix — region highlight rectangle renders as a trapezoid at high latitudes due to geographic projection; fix with proper great-circle segment rendering. ✓ Resolved — `_rect_path()` helper added to `src/viz/spatial_maps.py`; 50 intermediate points per edge ensure the border follows lines of constant latitude/longitude.
-- Skill curves chart width adjustment — chart feels narrower than the spatial map at default window width; review column proportions in `dashboard/app.py`. ✓ Resolved — column ratio changed from `[1, 1]` to `[3, 2]` in `dashboard/app.py`, giving the skill curves panel more horizontal space.
+All v1 refinement items (date-range picker, intermediate gridlines, region-box rendering, chart width) were resolved after v1.0; the date picker was rebuilt on the monthly region tables in Phase 8.
 
 ---
 
@@ -656,11 +557,11 @@ Build steps:
 |--------|------|--------|------|
 | NOAA AWS S3 (noaa-gfs-bdp-pds) | GFS forecast archive | Public S3, no key required | Free |
 | NSF NCAR GDEX (d084001, formerly RDA) | GFS 0.25° archive 2015-01-15 → 2021-03-22 (Phase 12: 2016 used) | Public, no key; THREDDS NetCDF Subset Service (`tds.gdex.ucar.edu/thredds/ncss/grid/files/g/d084001/…`) cuts each field to the domain; no `.idx` files | Free |
-| ECMWF open data (AWS `ecmwf-forecasts`) | IFS HRES forecasts from 2023 (0.25° from 2024-02-01) | Public, no key; CC-BY-4.0 attribution required | Free |
+| ECMWF open data (AWS `ecmwf-forecasts`) | IFS HRES forecasts (0.25° from 2024-02-01; used from then) | Public, no key; CC-BY-4.0 attribution required | Free |
 | Copernicus CDS | ERA5 reanalysis (hourly + monthly-by-hour climatology) | Free account + API key required | Free |
 | Streamlit Community Cloud | Dashboard hosting | GitHub login | Free |
 
-**ERA5 setup (do before Phase 2):**
+**ERA5 setup (needed only to rebuild data):**
 1. Register at https://cds.climate.copernicus.eu
 2. Follow API key setup guide at https://cds.climate.copernicus.eu/how-to-api
 3. Place `.cdsapirc` file in home directory as instructed
@@ -681,35 +582,21 @@ Build steps:
 - Config controls all parameters — nothing hardcoded
 - All new ideas go to Claude.ai first, then spec update, then Claude Code
 
-### 10.3 Daily Routines
+### 10.3 Routines (macOS)
 
-**Start of session:**
+**Session:** Claude.ai writes the prompt to `docs/sessionN_*.txt` (gitignored). In the repo: `claude --permission-mode auto`, then "Read docs/sessionN_….txt and carry it out." Prompts with decisions use Part A → STOP → decide → Part B.
+
+**Tests:**
 ```
-cd [path-to-wx-verify]
-python -m venv venv          # only first time
-venv\Scripts\activate        # Windows — activate environment
-source venv/bin/activate     # macOS
-pip install -r requirements.txt  # only when requirements changed
-code .                       # open VS Code
-# second terminal:
-claude                       # start Claude Code session
-# drop in SPEC.md, state current phase
+conda deactivate; cd ~/"Coding Projects/wx-verify"; source venv/bin/activate
+python -m pytest -q
 ```
 
-**End of session:**
-```
-git add .
-git commit -m "phase X stepY-Z: [description of what was built]"
-git push origin main
-# confirm on github.com/[username]/wx-verify
-```
+**Dashboard locally:** `streamlit run dashboard/app.py`
 
-**Checking status:**
-```
-git status                   # what's changed
-git log --oneline            # recent commits
-streamlit run dashboard/app.py  # test dashboard locally
-```
+**Releases:** maps changed → `scripts/publish_maps.sh` (new tag `maps-YYYYMMDD`, letter suffix for a second release that day) → check the asset count → commit → annotated tag → push. After a push that adds names to `src/` modules, reboot the Streamlit Cloud app if it shows an ImportError.
+
+**README figures:** `python scripts/make_readme_figures.py` (kaleido from requirements-dev.txt; needs a local Chrome or Chromium).
 
 ### 10.4 Two Tool Workflow
 
@@ -722,17 +609,13 @@ streamlit run dashboard/app.py  # test dashboard locally
 
 ---
 
-## 11. Environment Variables & Secrets
+## 11. Credentials
 
-```
-# .env (never commit this file — it is in .gitignore)
-CDS_API_KEY=your-key-here
-
-# For Streamlit Community Cloud deployment:
-# Add CDS_API_KEY as a secret in the Streamlit dashboard
-```
+- **ERA5 (CDS):** API key in `~/.cdsapirc` (read by `cdsapi`); needed only to run the pipeline. Never committed.
+- **GitHub CLI:** `gh auth login`; needed only by `scripts/publish_maps.sh`.
+- **Dashboard (local and Streamlit Cloud):** no credentials. It reads committed tables and downloads map files from the public release.
 
 ---
 
-*wx-verify · Version 1.2 · October 2026*
+*wx-verify · Version 2.0 · October 2026*
 *Spec is always the source of truth. Update here before building anywhere.*
