@@ -172,7 +172,7 @@ def test_requests_for_later_years_are_submitted_without_waiting_for_earlier_ones
 
 def test_batch_without_geopotential_is_completed_from_the_stored_orography(cds, monkeypatch):
     """CDS once returned deg0l without the static geopotential: the stored orography fills it in."""
-    service = cds(lambda req, n: "ok")
+    cds(lambda req, n: "ok")
     f = ERA5Fetcher(CFG)
     f.ensure_months(["frzl"], "europe", [(2023, 1)], [0, 12])                  # normal batch stores orography.nc
     assert (f.raw_path("frzl", "europe", 2023, 1).parent / "orography.nc").exists()

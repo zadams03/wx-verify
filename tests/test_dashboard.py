@@ -159,7 +159,6 @@ def test_difference_map_is_gfs_minus_ecmwf_with_positive_meaning_ecmwf_better():
 
 @needs_pairs
 def test_difference_map_matches_the_two_models_rmse_from_the_map_files():
-    import numpy as np
     import xarray as xr
     from src.processing.metrics import map_metrics
     at = _cmp_app()
@@ -221,7 +220,8 @@ def test_standalone_mode_is_unchanged_by_the_paired_rows():
     assert not at.exception
     assert any("runs verified" in c.value for c in at.caption)
     assert not any("paired runs" in c.value for c in at.caption)
-    assert len(at.select_slider[0].options) == 67                       # GFS: all of its months
+    opts = at.select_slider[0].options                                   # GFS: all of its months, across the gap
+    assert len(opts) == 79 and opts[0] == "2016-01" and opts[12] == "2021-03" and "2017-01" not in opts
 
 
 @needs_pairs

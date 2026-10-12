@@ -52,5 +52,5 @@ climatology: {source: era5_monthly_by_hour, period: [1991, 2020]}
 dashboard:
   map_resolution: 0.25
   committed_size_budget_mb: 150
-  maps_release_tag: maps-20261011b    # GitHub Release holding data/dashboard/maps (scripts/publish_maps.sh)
+  maps_release_tag: maps-20261012     # GitHub Release holding data/dashboard/maps (scripts/publish_maps.sh)
   maps_repo: zadams03/wx-verify

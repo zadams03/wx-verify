@@ -66,7 +66,7 @@ This project is explicitly a learning exercise in parallel with a portfolio deli
 | Model | Source | Period | Notes |
 |---|---|---|---|
 | GFS | NOAA AWS S3 (`noaa-gfs-bdp-pds`) | 2021-03-23 → 2026-09-20 | First full day of GFS v16 (v16 began 2021-03-22 12z; earlier runs use a different S3 layout). Byte-range downloads via `.idx`, exact field-name match. |
-| GFS (long record) | NCAR RDA `d084001` | 2015-01-15 → 2021-03-22 | Phase 12. Same 0.25° grids. Access method verified at Phase 12 kickoff. |
+| GFS (long record) | NCAR GDEX (formerly RDA) `d084001`, THREDDS NetCDF Subset Service | **2016-01-01 → 2016-12-31 built** (archive: 2015-01-15 → 2021-03-22; source enabled for that span) | Phase 12. Same 0.25° grids; each field cut to the domain on the server and returned as netCDF-3 (identical to the AWS copy on the 2021 overlap). Scope reduced to 2016 by Zac's decision; more years run with the same code (`--start/--end`). Precipitation before GFS v15.1 (2019-06-12 12z) is summed from 6-hour buckets. Snow water equivalent is not backfilled (3.6). Every response is checked against the request, range-checked, and 2 % are fetched twice; every 2016 field was then fetched a second time and compared (`scripts/verify_raw.py`, Issue 021). |
 | ECMWF IFS HRES | ECMWF open data, AWS mirror (`s3://ecmwf-forecasts`) | 2024-02-01 → 2026-09-20 | 0.25° from 1 Feb 2024 (0.4° before — excluded). Path layout changes at 2024-02-28 12z (`{date}/{HH}z/0p25/oper/` → `{date}/{HH}z/ifs/0p25/oper/`); JSON-lines index with byte offsets, matched on parsed keys. All 1,926 runs present. |
 
 - Runs: **00z and 12z only** (ECMWF open data only goes to 240h+ from these runs; halves volume).
@@ -93,9 +93,10 @@ Region boxes reviewed and confirmed by Zac (Oct 2026). Known overlaps (Western C
 - All lead-time-dependent code (axes, ticks, gridlines, selectors) reads `lead_times_hours` from config — single source.
 
 ### 3.6 Date Range
-- Dates are **initialisation** dates. GFS: 2021-03-23 → 2026-09-20 (Phases 8–11), extended back to 2015-01-15 in Phase 12. ECMWF: 2024-02-01 → 2026-09-20.
+- Dates are **initialisation** dates. GFS: **2016-01-01 → 2016-12-31 and 2021-03-01 → 2026-09-20** (Phase 12 added 2016 and 1–22 March 2021 from NCAR; 2021-03-23 onward from AWS, Phases 8–11). The record has a gap, 2017-01 → 2021-02: the month picker offers only months with data and says so, a window across the gap pools the months it holds, and time charts draw no line across it. ECMWF: 2024-02-01 → 2026-09-20.
+- Snow water equivalent starts 2021-03-23 (config `variables.swe.start`): GFS `WEASD` over open water is 0 in v12, v13 and v15.1 but missing in v14 and from v15.2, so the sample would change with the model version. The dashboard says so.
 - The end date is chosen so every lead time (up to 240h) verifies against ERA5 available at build time (ERA5 runs ~5 days behind real time).
-- Head-to-head views use only the period both models cover. GFS-only views show the full record.
+- Head-to-head views use only the period both models cover. GFS-only views show the full record (including the skill-through-time view).
 - The last ~3 months of ERA5 are preliminary (ERA5T) and can be revised; flagged on the dashboard.
 - Dashboard date picker works at month resolution (see 4.4).
 
@@ -120,9 +121,10 @@ Definitions (fixed from Phase 8):
 - **ERA5 is produced with the ECMWF model.** Verifying ECMWF against ERA5 favours ECMWF; the head-to-head view says so.
 - **Terrain mismatch.** At 0.25° each model and ERA5 represent mountains at different heights. In mountain regions, part of the T2m and freezing-level "bias" reflects terrain representation, not forecast error.
 - **Model upgrades.** Skill changes across an upgrade date may reflect the model change. Known dates (config `model_versions`):
-  - GFS v15 (FV3 core): 2019-06-12 12z · GFS v16: 2021-03-22 12z · GFS v17: proposed Oct 2026 (after record end)
+  - GFS v12: 2015-01-14 (EMC: "implementation completed January 14th, 2015"; hour not given) · v13: 2016-05-11 12z · v14: 2017-07-19 12z (first run with the v14 fields in the NCAR archive) · v15.1 (FV3 core): 2019-06-12 12z · v16: 2021-03-22 12z · GFS v17: proposed Oct 2026 (after record end). Dashboard markers: v12–v16 (config lists v15.1 as "v15").
+  - Not marked: GFS v15.2 (2019-11-07 12z; seen in the archive — `LANDN` appears and `WEASD` over sea becomes missing); v15.3 — date not confirmed. Both fall in the gap.
+  - The 2016 period spans v12 → v13; 2025 is all v16. The skill-through-time view lists the versions each period covers.
   - ECMWF IFS 49r1: 2024-11-12 (first 00z/12z run affected: 12z) · IFS 50r1 (with AIFS v2): 2026-05-12 (first affected: 12z). 48r1 (2023-06-27) is before the ECMWF record.
-  - Earlier GFS (v13, v14) to be confirmed at Phase 12 kickoff.
 - **ERA5 snow and precipitation** are weaker truth than ERA5 temperature or pressure, especially in complex terrain.
 
 ---
@@ -154,6 +156,8 @@ wx-verify/
 │   ├── publish_maps.sh        ← Uploads data/dashboard/maps/ to the GitHub Release (run by Zac, asks before uploading)
 │   ├── build_permanent_snow_mask.py ← v1.8.1: builds data/static/era5_permanent_snow_{domain}.nc from ERA5 (CDS)
 │   ├── apply_swe_mask.py      ← v1.8.1 one-off: applied that mask to the existing swe aggregates
+│   ├── verify_raw.py          ← Phase 12: fetches every stored NCAR field a second time, settles disagreements with copies fetched alone, patches the raw file (needs --keep-raw)
+│   ├── outlier_scan.py        ← Phase 12: flags backfilled months > 4 robust SDs from the record; re-fetches a sample and compares with the raw file
 │   └── era5_source_test.py    ← Phase 10b one-off: ARCO-ERA5 / NCAR ERA5 vs CDS (test-only packages gcsfs, zarr, s3fs, h5netcdf; not in requirements.txt)
 │
 ├── src/
@@ -165,7 +169,7 @@ wx-verify/
 │   │   ├── registry.py        ← Variable registry: per-source field names and unit conversions (wind speed from u/v, ERA5 derivations)
 │   │   ├── map_store.py       ← Hosted map files: manifest builder, local-first lookup, cached download from the GitHub Release
 │   │   ├── gfs_fetcher.py     ← GFS archive acquisition (AWS byte-range)
-│   │   ├── gfs_ncar_fetcher.py← GFS long record (NCAR RDA) — Phase 12
+│   │   ├── gfs_ncar_fetcher.py← GFS long record (NCAR GDEX d084001, THREDDS NCSS): request checks, range checks, 2 % duplicate copies — Phase 12
 │   │   ├── ecmwf_fetcher.py   ← ECMWF open data (AWS mirror) — Phase 9
 │   │   └── era5_fetcher.py    ← ERA5 hourly + monthly-by-hour climatology (CDS)
 │   │
@@ -211,15 +215,16 @@ models:
     enabled: true
     sources:
       - {name: aws,  start: "2021-03-23", end: "2026-09-20"}
-      - {name: ncar, start: "2015-01-15", end: "2021-03-22", enabled: false}   # Phase 12
+      - {name: ncar, start: "2015-01-15", end: "2021-03-22"}   # Phase 12 (2016 built; run scope set by --start/--end)
   ecmwf:
     enabled: false              # Phase 9
     sources:
       - {name: aws,  start: "2024-02-01", end: "2026-09-20"}
 
 model_versions:                 # vertical markers on time-based views
-  gfs:   [{name: "v15", date: "2019-06-12"}, {name: "v16", date: "2021-03-22"}]
-  ecmwf: []                     # filled at Phase 9 kickoff
+  gfs:   [{name: "v12", date: "2015-01-14"}, {name: "v13", date: "2016-05-11"}, {name: "v14", date: "2017-07-19"},
+          {name: "v15", date: "2019-06-12"}, {name: "v16", date: "2021-03-22"}]
+  ecmwf: [{name: "49r1", date: "2024-11-12"}, {name: "50r1", date: "2026-05-12"}]
 
 variables:
   t2m:  {long_name: "2m Temperature", units: "°C",  scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: true}
@@ -228,7 +233,7 @@ variables:
   ws10: {long_name: "10m wind speed", units: "m/s", scores: [bias, rmse, acc], models: [gfs, ecmwf], enabled: false}
   frzl: {long_name: "Freezing level", units: "m", scores: [bias, rmse], models: [gfs], enabled: false}
   tp24: {long_name: "24h precipitation", units: "mm", scores: [freq_bias, ets, bias], thresholds: [1, 5, 10], models: [gfs, ecmwf], enabled: false}
-  swe:  {long_name: "Snow water equivalent", units: "mm", scores: [bias, rmse], models: [gfs, ecmwf], enabled: false}
+  swe:  {long_name: "Snow water equivalent", units: "mm", scores: [bias, rmse], models: [gfs], enabled: true, start: "2021-03-23"}   # optional start: the variable's first init date
 
 domains:
   europe:
@@ -247,7 +252,7 @@ climatology: {source: era5_monthly_by_hour, period: [1991, 2020]}
 dashboard:
   map_resolution: 0.25
   committed_size_budget_mb: 150
-  maps_release_tag: maps-20261011b    # GitHub Release holding data/dashboard/maps (maps-YYYYMMDD, letter suffix for a second release that day)
+  maps_release_tag: maps-20261012     # GitHub Release holding data/dashboard/maps (maps-YYYYMMDD, letter suffix for a second release that day)
   maps_repo: zadams03/wx-verify
 ```
 
@@ -566,10 +571,22 @@ Build steps:
 **Learning checkpoint before starting:** GFS history 2015–2021 (spectral core → FV3 in v15, v16 changes); why verifying every period against the same ERA5 truth makes era comparisons fair; sampling uncertainty — how much of a year-to-year skill difference is noise.
 
 Build steps:
-82. Kickoff checks (report before building): NCAR RDA `d084001` access — whether byte-range/index access or server-side subsetting is possible; if only whole files, estimate download volume and propose a reduced sample (e.g. 00z only) for Zac to approve. Confirm GFS v13/v14 dates.
-83. `gfs_ncar_fetcher.py` as a second GFS source. Enable `ncar` source; run GFS for all enabled variables and domains back to 2015-01-15 (variables limited to what the archive provides).
-84. Skill-through-time view: pick two periods (e.g. a year a decade ago vs the latest year), same model/variable/region; overlaid skill curves and a difference map; model-version markers and which versions each period covers.
+82. ✓ Kickoff checks (report before building): NCAR RDA `d084001` access — whether byte-range/index access or server-side subsetting is possible; if only whole files, estimate download volume and propose a reduced sample (e.g. 00z only) for Zac to approve. Confirm GFS v13/v14 dates.
+83. ✓ `gfs_ncar_fetcher.py` as a second GFS source. Enable `ncar` source; run GFS for all enabled variables and domains back to 2015-01-15 (variables limited to what the archive provides). *Scope reduced to 2016 by Zac's decision (Session 8); more years run with the same code.*
+84. ✓ Skill-through-time view: pick two periods (e.g. a year a decade ago vs the latest year), same model/variable/region; overlaid skill curves and a difference map; model-version markers and which versions each period covers.
 85. Final README (written with Zac — not by Claude Code), full audit. Tag `v2.0`. Commit: "Phase 12 complete — wx-verify v2.0".
+
+**Phase 12 build notes (Session 8, Oct 2026):**
+- **Access (step 82).** NCAR GDEX `d084001` holds one GRIB2 file per run and 3-hourly step (`gfs.0p25.YYYYMMDDHH.fFFF.grib2`) with no `.idx` files; whole-file download ran at ~0.7 MB/s. Its THREDDS NetCDF Subset Service cuts one field to the domain on the server and returns netCDF-3 (longitudes continue past 360°, latitude descends, times "Hour since …Z"). Decoded values equal the AWS byte-range path on the 2021 overlap. Field names/levels/units live in the registry (`NCSSField`). Precipitation: from v15.1 (2019-06-12 12z) a file holds the 0→N accumulation beside the 6-hour bucket (THREDDS "Mixed_intervals", needs `temporal=all`); before it only the bucket exists, so a 24 h window is the sum of four buckets (raw files carry a `windowed` flag per run, so a month spanning v15.1 works). GFS v13/v14 dates confirmed (3.8); v12 from EMC's implementation page.
+- **Scope.** Kickoff recommendation was 2015-01 → 2021-02, both domains; reduced to **2016** by Zac after the v1.8.1 stop. Both domains, 00z/12z, every enabled variable except swe (3.6). 1–22 March 2021 also added (2021-03 re-aggregated with both sources; the 23–31 March part rebuilt from the kept raw files matched the old month exactly — max difference 0 in every region row and grid sum, all six variables, both domains).
+- **Run.** 24 domain-months, 0 failed, 258 min with both domains in parallel (CDS queue first, then ~7–13 min per domain-month). Runs per domain: 732 in 2016; t2m/msl/ws10/frzl 729 verified, z500 730, tp24 722; 0 ERA5 exclusions. Every exclusion is an archive defect (Issue 022). Raw kept (`--keep-raw`) for the checks below, then purged.
+- **Integrity (Issue 021).** Every NCSS response is checked against the request (run, variable, units, level, valid time or accumulation interval, grid); every field against its variable's plausible range (`part_ranges`, from `valid_range`: ws10 components ±75 m/s, z500 4,400–6,200 m); a seeded 2 % of fields are fetched a second time with no other request in flight from any process and must be identical. Backfill: **1,582 fields duplicate-checked, 1 mismatch** (t2m north_america_west 2016-08-15 00z +72h: the first copy, which passed every label check, differed from the lone copy in 12,264 of 16,065 values by up to 32.9 K; the next two copies agreed and were kept), 0 unresolved. Because that showed wrong values under right labels, `scripts/verify_raw.py` then fetched **every stored 2016 field a second time**: 43,872 run/lead fields compared, 11 disagreements — 4 where the stored copy was wrong (frzl europe 2016-03-22 12z +24h, max 1,780 m; ws10 europe 2016-04-18 12z +240h, 15.1 m/s; tp24 north_america_west 2016-07-27 00z +48h, 25.4 mm; msl europe 2016-08-04 00z +120h, 455 Pa), 7 where the second copy was wrong. The 4 raw files were patched and the months re-aggregated: the wrong field had moved those months' region RMSE at its lead by up to 7.8 % (frzl, Iberian Peninsula 24 h), other leads unchanged. About 1 in 7,500 field copies came back wrong.
+- **Outlier scan** (`scripts/outlier_scan.py`, month RMSE or tp24 ETS vs median/MAD of the same variable/region/lead over the record, |z| > 4): 49 series-months in 12 variable/domain-months flagged (North America t2m Dec and Jan, z up to 8.8; Europe ws10 Jan–Feb, msl Jan–Feb, z500 Jan, frzl UK & Ireland Nov–Dec, t2m Jun–Aug in the Mediterranean and Alps; none for tp24). For each flagged month 4 seeded days were re-fetched one request at a time: identical to the raw file in all 12 (480 fields), as were 6 unflagged control months. For scale, the same scan flags 10 series-months in the trusted 2021 data. The flags are taken to be 2016 weather and skill, not data errors.
+- **Hand check.** z500, Western Europe, 2016-01, in plain numpy from the raw GFS file and the raw ERA5 file (z / 9.80665), box from 3.4: three fresh NCSS fields identical to the raw file (max difference 0); bias and RMSE at all five leads match the stored rows to 1e-4 m (float32 rounding of ~5,500 m heights), sum of weights exact, 62 runs.
+- **Skill vs year (Western Europe, 24 h / 120 h).** t2m RMSE 2016 1.50 / 2.11 °C, 2021–2026 1.38–1.46 / 1.97–2.12; z500 RMSE 2016 8.12 / 50.8 m, 2021–2026 6.71–7.23 / 44.5–47.1. No step at v13 (2016-05-11) in the monthly values; the z500 24 h bias is positive in 11 of 12 months of 2016 (v12/v13) and negative in every year 2021–2026 (v16). v14, v15 and v16 all fall in the gap, so a difference between 2016 and 2021+ cannot be tied to one upgrade. Nothing here tests cause.
+- **Skill-through-time view (step 84).** Dashboard "View" switch: two calendar years (default earliest vs latest full year: 2016 vs 2025; part years marked), overlaid skill curves for each, an RMSE/ACC/ETS difference map from the yearly map files, and a year-by-year chart at the chosen lead with version markers, part years hollow, the gap shaded and no line across it. Each period lists the versions that produced it (2016: v12 → v13 from 2016-05-11; 2025: v16). Head-to-head: years from the common period only. GFS-only: full record.
+- **Tables and maps.** Every row from 2021-04 onward identical to before in all three tables; 2021-03 rows rebuilt (now 61/62 runs with 1–22 March). Maps: 136 files, 206 MB, release `maps-20261012` (12 new 2016 files; the 12 non-swe 2021 files changed for 1–22 March; all others identical). Committed dashboard data 2.7 MB.
+- **Divergences from the prompt/spec:** 2016 only (Zac); swe not backfilled (Zac); verify pass of every field (beyond the 2 % duplicate check, after it found a silent error); `--keep-raw` during the backfill; GFS v12 date added; 2019-01 smoke-test aggregates moved to `aggregates_prev/phase12_smoke_2019-01/` so the record has no stray month.
 
 ---
 
@@ -598,6 +615,8 @@ Build steps:
 | 018 | Phase 11 | Snow water equivalent in glaciated western North America: ERA5 gives cells on glaciers 1–10 m of water equivalent (a fixed 10 m placeholder, masked, and values just below it), GFS tens to hundreds of mm. Western Canada 24 h RMSE is ~570 mm and bias −54 mm even in summer; the Rockies/Pacific Northwest are far less affected. | Resolved in v1.8.1 — static ERA5 permanent-snow mask (Aug–Sep minimum ≥ 10 mm every year 2015–2026; 139 cells, none in Europe). Western Canada whole-record 24 h bias / RMSE −89.6 / 564.5 → −35.1 / 90.5 mm, 240 h −84.8 / 560.0 → −30.7 / 85.4 mm (Oct 2026) |
 | 019 | Phase 11 | ERA5 hourly `tp` time-stamp convention (stamp = end of the accumulation hour). A correlation check against IFS HRES supported but could not prove it. | Resolved — ECMWF documentation: "Accumulations are over the hour (the processing period) ending at the validity date/time" (Confluence, Conversion table for accumulated variables), as implemented (Oct 2026) |
 | 020 | Phase 11 | ECMWF snow water equivalent not verified: open data has `sd` only from 2025-11-20. | Parked |
+| 021 | Phase 12 | NCAR THREDDS NCSS, under concurrent load, sometimes answers a request with another request's data — seen with wrong labels (another run's reference time, `v` for a `u` request, another valid time; one passed into the first smoke test as a 99.9 m/s wind) and, after label checks were added, **with correct labels but wrong values**. Rates in the 2016 backfill: 1 in 1,582 duplicate-checked fields; 4 wrong stored fields in 43,872 (verify pass). | Mitigated — every response checked against the request and re-requested on mismatch; per-field plausible-range check; a seeded 2 % fetched twice alone; for 2016 every field fetched twice (`scripts/verify_raw.py`) and the 4 wrong fields patched. Residual risk: a field wrong in both independent copies in the same way (not seen); later years should run the verify pass too |
+| 022 | Phase 12 | NCAR `d084001` archive defects in 2016: not in the archive — 2016-01-06 12z f228, 2016-02-09 00z f102, 2016-03-03 12z f042, 2016-03-10 12z f108, 2016-09-25 12z f072, 2016-10-02 00z f018, 2016-10-19 12z f240; listed but without the field (NCSS 400 "is not contained in the requested dataset") — 2016-09-09 00z f228 and 2016-09-26 00z f036 (no 6-hour precipitation), 2016-10-20 00z f120 (every field used except 500 hPa height). The affected runs are excluded under the homogeneous-sample rule and counted (3 per variable, 2 for z500, 10 for tp24, per domain). | Noted for reference — retried once, unchanged; both kinds are now recognised at once, not retried |
 
 ---
 
@@ -631,7 +650,7 @@ Build steps:
 | Source | What | Access | Cost |
 |--------|------|--------|------|
 | NOAA AWS S3 (noaa-gfs-bdp-pds) | GFS forecast archive | Public S3, no key required | Free |
-| NCAR RDA (d084001) | GFS 0.25° archive 2015–2021 (Phase 12) | Public download; method confirmed at Phase 12 kickoff | Free |
+| NSF NCAR GDEX (d084001, formerly RDA) | GFS 0.25° archive 2015-01-15 → 2021-03-22 (Phase 12: 2016 used) | Public, no key; THREDDS NetCDF Subset Service (`tds.gdex.ucar.edu/thredds/ncss/grid/files/g/d084001/…`) cuts each field to the domain; no `.idx` files | Free |
 | ECMWF open data (AWS `ecmwf-forecasts`) | IFS HRES forecasts from 2023 (0.25° from 2024-02-01) | Public, no key; CC-BY-4.0 attribution required | Free |
 | Copernicus CDS | ERA5 reanalysis (hourly + monthly-by-hour climatology) | Free account + API key required | Free |
 | Streamlit Community Cloud | Dashboard hosting | GitHub login | Free |

@@ -260,7 +260,7 @@ with st.sidebar:
         first_month, last_month = months[0], months[-1]
 
     st.divider()
-    st.caption("v1.8.1 · October 2026")
+    st.caption("v2.0 · October 2026")
 
 units = cfg.variables[variable].units
 long_name = cfg.variables[variable].long_name
